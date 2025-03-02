@@ -104,7 +104,7 @@ def reasoningEGC():
     json_data['arg']['property'] = str(config['property_codes'][json_data['arg']['property']])
 
     json_demo = convert_value(json_data)
-    result = crm.caseP arsingEGC(json_demo)
+    result = crm.caseParsingEGC(json_demo)
     data = result['most_similiar_case']['covariates']
     new_covariates = []
     for covariate in data:
