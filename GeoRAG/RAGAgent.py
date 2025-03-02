@@ -48,7 +48,8 @@ def ask_agent(
     use_api: bool = False,
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
-    vector_db: Optional[VectorDB] = None
+    vector_db: Optional[VectorDB] = None,
+    callback = None  # 添加回调函数参数
 ):
     """运行RAG智能体"""
     vector_db = vector_db or create_db(embed_model_name)
@@ -86,6 +87,10 @@ def ask_agent(
     
     # 运行智能体
     for chunk in agent.stream({"messages": [("human", query)]}):
+        # 如果提供了回调函数，调用它
+        if callback:
+            callback(chunk)
+            
         if "agent" in chunk:
             agent_message = chunk["agent"]["messages"][0]
             if agent_message.tool_calls:

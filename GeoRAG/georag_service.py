@@ -69,7 +69,8 @@ def ask_question():
             use_api=use_api,
             api_key=api_key,
             api_base=api_base,
-            vector_db=VECTOR_DB
+            vector_db=VECTOR_DB,
+            callback=stream_response  # 添加回调函数参数
         )
         return jsonify({"response": "\n".join(response)}), 200
     except Exception as e:
