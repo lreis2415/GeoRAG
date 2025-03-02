@@ -7,6 +7,7 @@ GeoRAG/
 ├── LocalVectorDB.py    # 本地向量数据库实现
 ├── RAGAgent.py         # RAG智能体实现
 ├── VectorDB.py         # 向量数据库抽象基类
+├── georag_service.py   # Flask服务实现
 ├── database/           # 数据库存储目录
 │   └── animals_llama3.1/
 │       ├── chroma.sqlite3
