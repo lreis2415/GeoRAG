@@ -11,18 +11,38 @@ app.debug = True
 def start():  # put application's code here
     return "The program is running!"
 def convert_value(value):
+    """
+    将给定的值转换为适当的类型。
+    
+    如果值是字符串，则尝试将其转换为整数或浮点数。
+    如果值是列表，则递归地转换列表中的每个元素。
+    如果值是字典，则递归地转换字典中的每个值。
+    其他类型的值将原样返回。
+    
+    参数:
+    - value: 要转换的值，可以是字符串、列表、字典或其他任何类型的值。
+    
+    返回:
+    - 转换后的值。
+    """
+    # 检查输入值是否为字符串类型
     if isinstance(value, str):
+        # 如果是数字字符串，则转换为整数
         if value.isdigit():
             return int(value)
         else:
+            # 尝试将字符串转换为浮点数，如果失败则原样返回
             try:
                 return float(value)
             except ValueError:
                 return value
+    # 如果输入值是列表，则对每个元素递归调用本函数进行转换
     elif isinstance(value, list):
         return [convert_value(x) for x in value]
+    # 如果输入值是字典，则对每个值递归调用本函数进行转换，键保持不变
     elif isinstance(value, dict):
         return {k: convert_value(v) for k, v in value.items()}
+    # 如果输入值不是上述类型，则原样返回
     else:
         return value
 
@@ -84,7 +104,7 @@ def reasoningEGC():
     json_data['arg']['property'] = str(config['property_codes'][json_data['arg']['property']])
 
     json_demo = convert_value(json_data)
-    result = crm.caseParsingEGC(json_demo)
+    result = crm.caseP arsingEGC(json_demo)
     data = result['most_similiar_case']['covariates']
     new_covariates = []
     for covariate in data:
