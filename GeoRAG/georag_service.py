@@ -53,6 +53,10 @@ def get_available_chat_models():
         logging.error(f"加载聊天模型失败: {e}")
         return []  
       
+@app.route('/', methods=['GET'])
+def ready():
+    return jsonify({"message": "GeoRAG Service is ready"}), 200
+
 @app.route("/create_db", methods=["POST"])
 def create_database():
     """
