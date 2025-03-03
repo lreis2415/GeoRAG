@@ -6,6 +6,8 @@
 *.bin
 *.pyc
 *.sqlite3
+*.txt
+*.DS_Store
 
 # 忽略配置变量
 *.env
