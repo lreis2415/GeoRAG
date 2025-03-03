@@ -1,6 +1,6 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
-from VectorDB import VectorDB
+from .VectorDB import VectorDB
 from langchain_ollama import OllamaEmbeddings
 from tqdm import tqdm
 from typing import Optional, Dict

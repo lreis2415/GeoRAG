@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
 from langgraph.prebuilt import create_react_agent
-from VectorDB import VectorDB
-from LocalVectorDB import LocalVectorDBChroma
+from .VectorDB import VectorDB
+from .LocalVectorDB import LocalVectorDBChroma
 
 # 加载环境变量
 load_dotenv()
