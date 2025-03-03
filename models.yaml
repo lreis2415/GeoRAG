@@ -1,7 +1,9 @@
 embedding_models:
-  - name: "llama3.1"
+  - name: "llama3.3-70b-instruct"
     status: "active"
-  - name: "qwen2.5"
+  - name: "llama3.1-70b-instruct"
+    status: "active"
+  - name: "text-embedding-v3"
     status: "active"
 chat_models:
   - name: "qwen-turbo"

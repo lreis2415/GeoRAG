@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
 from langgraph.prebuilt import create_react_agent
+
+from GeoRAG.FlexibleVectorDB import FlexibleVectorDB
 from .VectorDB import VectorDB
 from .LocalVectorDB import LocalVectorDBChroma
 
@@ -15,6 +17,7 @@ from .LocalVectorDB import LocalVectorDBChroma
 load_dotenv()
 openai_api_key = os.environ.get("QWEN_API_KEY")
 openai_api_base = os.environ.get("QWEN_API_BASE")
+embedding_api_url = os.environ.get("EMBEDDING_API_URL")
 
 # 配置路径
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -68,7 +71,12 @@ def create_db(model_name: str, db_name: str, file_paths: List[str] = None, vecto
     persist_directory = get_persist_directory(db_name)
     
     if vector_db is None:
-        vector_db = LocalVectorDBChroma(
+        # vector_db = LocalVectorDBChroma(
+        #     model_name=model_name,
+        #     persist_directory=persist_directory
+        # )
+        vector_db = FlexibleVectorDB(
+            embedding_api_url=embedding_api_url,
             model_name=model_name,
             persist_directory=persist_directory
         )

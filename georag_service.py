@@ -12,7 +12,7 @@ from GeoRAG.RAGAgent import ask_agent, create_db, get_all_databases, save_upload
 class GeoRAGService:
     def __init__(self):
         self.vector_dbs = {}  # 存储已加载的向量数据库
-        self.default_embed_model = "llama3.1"
+        self.default_embed_model = "text-embedding-v3"
         self.default_chat_model = "qwen-turbo"
         self.allowed_extensions = {'csv', 'json', 'txt'}
         
