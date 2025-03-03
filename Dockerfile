@@ -1,6 +1,15 @@
-FROM osgeo/gdal:alpine-normal-latest
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && \
-    apk add py3-flask py3-waitress py3-pandas py3-yaml py3-openpyxl
-COPY . /casereasoning_dev
-WORKDIR /casereasoning_dev
-CMD ["python3","caseReasoningApp.py"] 
+FROM docker.anye.in/library/python:3.11
+
+ENV PYTHONDONTWRITEBYTECODE=1
+
+
+RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+
+COPY . /GeoRAGApp
+
+WORKDIR /GeoRAGApp
+
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+CMD ["python3","GeoRAGApp.py"] 

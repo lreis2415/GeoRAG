@@ -3,8 +3,10 @@ import logging
 import uuid
 from flask import jsonify
 import yaml
+from werkzeug.utils import secure_filename
 
-from GeoRAG.RAGAgent import ask_agent, create_db, get_all_databases
+
+from GeoRAG.RAGAgent import ask_agent, create_db, get_all_databases, save_uploaded_file
 
 
 class GeoRAGService:
@@ -90,10 +92,10 @@ class GeoRAGService:
                 for file in files:
                     if file and self.allowed_file(file.filename):
                         # 安全地获取文件名并保存
-                        filename = self.secure_filename(file.filename)
+                        filename = secure_filename(file.filename)
                         # 添加随机字符串避免文件名冲突
                         unique_filename = f"{uuid.uuid4().hex}_{filename}"
-                        file_path = self.save_uploaded_file(file, unique_filename)
+                        file_path = save_uploaded_file(file, unique_filename)
                         file_paths.append(file_path)
             
             # 创建数据库
