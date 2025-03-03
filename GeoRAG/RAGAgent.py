@@ -2,7 +2,8 @@
 # -*- coding:utf-8 -*-
 import os
 import sys
-from typing import Optional
+import shutil
+from typing import Optional, List
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
@@ -19,16 +20,52 @@ openai_api_base = os.environ.get("QWEN_API_BASE")
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 current_dir = os.path.dirname(os.path.abspath(__file__))
-src_file_path = os.path.join(current_dir, 'documents/animals_custom.csv')
+documents_dir = os.path.join(current_dir, 'documents')
+database_dir = os.path.join(current_dir, 'database')
 
-def get_persist_directory(model_name: str) -> str:
+# 确保目录存在
+os.makedirs(documents_dir, exist_ok=True)
+os.makedirs(database_dir, exist_ok=True)
+
+def get_persist_directory(db_name: str) -> str:
     """获取向量数据库存储路径"""
-    model_name = model_name.replace(":", "-")
-    return os.path.join(current_dir, f'database/animals_{model_name}')
+    db_name = db_name.replace(":", "-")
+    return os.path.join(database_dir, db_name)
 
-def create_db(model_name: str, vector_db: Optional[VectorDB] = None) -> VectorDB:
-    """创建向量数据库"""
-    persist_directory = get_persist_directory(model_name)
+def get_all_databases() -> List[str]:
+    """获取所有知识库名称"""
+    if not os.path.exists(database_dir):
+        return []
+    return [d for d in os.listdir(database_dir) if os.path.isdir(os.path.join(database_dir, d))]
+
+def delete_database(db_name: str) -> bool:
+    """删除知识库"""
+    db_path = get_persist_directory(db_name)
+    if os.path.exists(db_path):
+        shutil.rmtree(db_path)
+        return True
+    return False
+
+def save_uploaded_file(file, filename: str) -> str:
+    """保存上传的文件到documents目录"""
+    file_path = os.path.join(documents_dir, filename)
+    with open(file_path, 'wb') as f:
+        f.write(file.read())
+    return file_path
+
+def create_db(model_name: str, db_name: str, file_paths: List[str] = None, vector_db: Optional[VectorDB] = None) -> VectorDB:
+    """创建向量数据库
+    
+    Args:
+        model_name: 嵌入模型名称
+        db_name: 数据库名称
+        file_paths: 要嵌入的文件路径列表
+        vector_db: 可选的向量数据库实例
+    
+    Returns:
+        VectorDB: 向量数据库实例
+    """
+    persist_directory = get_persist_directory(db_name)
     
     if vector_db is None:
         vector_db = LocalVectorDBChroma(
@@ -36,8 +73,17 @@ def create_db(model_name: str, vector_db: Optional[VectorDB] = None) -> VectorDB
             persist_directory=persist_directory
         )
     
-    if not os.path.exists(persist_directory):
-        vector_db.embed_csv(src_file_path)
+    # 如果提供了文件路径，则嵌入这些文件
+    if file_paths and not os.path.exists(persist_directory):
+        for file_path in file_paths:
+            if file_path.endswith('.csv'):
+                vector_db.embed_csv(file_path)
+            elif file_path.endswith('.json'):
+                vector_db.embed_json(file_path)
+            elif file_path.endswith('.txt'):
+                vector_db.embed_txt(file_path)
+            elif file_path.startswith('http'):
+                vector_db.embed_webpage(file_path)
         
     return vector_db
 
@@ -45,6 +91,7 @@ def ask_agent(
     embed_model_name: str,
     chat_model_name: str,
     query: str,
+    db_name: str,
     use_api: bool = False,
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
@@ -52,7 +99,7 @@ def ask_agent(
     callback = None  # 添加回调函数参数
 ):
     """运行RAG智能体"""
-    vector_db = vector_db or create_db(embed_model_name)
+    vector_db = vector_db or create_db(embed_model_name, db_name)
     
     # 创建检索器
     vector_store = vector_db.get_vector_store()
@@ -64,8 +111,8 @@ def ask_agent(
     # 创建工具
     tools = [
         retriever.as_tool(
-            name="animals_info_retriever",
-            description="查询动物信息"
+            name="info_retriever",
+            description="查询信息"
         )
     ]
     
@@ -114,13 +161,16 @@ def ask_agent(
 def test_model(
     embed_model_name: str,
     chat_model_name: str,
+    db_name: str = "test_db",
     use_api: bool = False,
     api_key: Optional[str] = None,
     api_base: Optional[str] = None
 ):
     """测试模型"""
     print(f'\n---------------------{embed_model_name}-----------------------------')
-    create_db(embed_model_name)
+    # 使用默认的animals_custom.csv文件创建测试数据库
+    src_file_path = os.path.join(documents_dir, 'animals_custom.csv')
+    create_db(embed_model_name, db_name, [src_file_path])
     
     queries = [
         "羊的学名是什么？它对人类有什么用处？",
@@ -128,7 +178,7 @@ def test_model(
     ]
     
     for query in queries:
-        ask_agent(embed_model_name, chat_model_name, query, use_api, api_key, api_base)
+        ask_agent(embed_model_name, chat_model_name, query, db_name, use_api, api_key, api_base)
 
 if __name__ == '__main__':
-    test_model("llama3.1", "qwen-turbo", use_api=True, api_key=openai_api_key, api_base=openai_api_base)
+    test_model("llama3.1", "qwen-turbo", "animals_db", use_api=True, api_key=openai_api_key, api_base=openai_api_base)
