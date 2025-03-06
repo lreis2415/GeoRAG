@@ -10,7 +10,7 @@ GeoRAG 是一个基于Retrieval-Augmented Generation (RAG) 技术的地理信息
 - 多模型支持：支持多种嵌入模型和聊天模型，可根据需求灵活配置
 
 ## 快速开始
-1. 确保已安装Python 3.8+
+1. 确保已安装Python 3.9+，建议版本 3.11
 2. 克隆本项目：
    ```bash
    git clone https://github.com/your-repo/GeoRAG.git
