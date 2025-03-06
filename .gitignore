@@ -11,3 +11,4 @@
 
 # 忽略配置变量
 *.env
+.clinerules
