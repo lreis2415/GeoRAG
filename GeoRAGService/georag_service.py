@@ -227,7 +227,6 @@ class GeoRAGService:
         请求参数:
             query: 用户查询
             db_name: 知识库名称
-            embed_model_name: 嵌入模型名称 (可选)
             chat_model_name: 聊天模型名称 (可选)
             use_api: 是否使用API (可选，默认True)
         返回值:
@@ -242,7 +241,6 @@ class GeoRAGService:
         api_base = os.environ.get("OPENAI_API_BASE")  # 使用环境变量中的 API 基础 URL
         
         # 获取用户指定的模型名称
-        embed_model_name = request.json.get("embed_model_name", self.default_embed_model)
         chat_model_name = request.json.get("chat_model_name", self.default_chat_model)
         
         # 验证必要参数
@@ -252,8 +250,6 @@ class GeoRAGService:
             return jsonify({"error": "db_name is required"}), 400
         
         # 验证模型是否存在
-        if embed_model_name not in self.get_available_embedding_models():
-            return jsonify({"error": f"Embedding model '{embed_model_name}' is not available"}), 400
         if chat_model_name not in self.get_available_chat_models():
             return jsonify({"error": f"Chat model '{chat_model_name}' is not available"}), 400
         
@@ -272,10 +268,8 @@ class GeoRAGService:
                     response.append(tool_message.content)  # 捕获工具消息内容
             
             ask_agent(
-                embed_model_name=embed_model_name,
                 chat_model_name=chat_model_name,
                 query=query,
-                db_name=db_name,
                 use_api=use_api,
                 api_key=api_key,
                 api_base=api_base,

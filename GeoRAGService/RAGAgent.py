@@ -95,10 +95,8 @@ def create_db(model_name: str, db_name: str, file_paths: List[str] = None, vecto
     return vector_db
 
 def ask_agent(
-    embed_model_name: str,
     chat_model_name: str,
     query: str,
-    db_name: str,
     use_api: bool = False,
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
@@ -106,7 +104,6 @@ def ask_agent(
     callback = None  # 添加回调函数参数
 ):
     """运行RAG智能体"""
-    vector_db = vector_db or create_db(embed_model_name, db_name)
     
     # 创建检索器
     vector_store = vector_db.get_vector_store()
