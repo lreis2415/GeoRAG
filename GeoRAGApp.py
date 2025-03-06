@@ -1,7 +1,7 @@
 from flask import Flask, abort, request, send_file
 from waitress import serve
 from dotenv import load_dotenv
-from GeoRAG.georag_service import GeoRAGService
+from GeoRAGService.georag_service import GeoRAGService
 import os
 
 load_dotenv()

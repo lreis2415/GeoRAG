@@ -4,7 +4,7 @@ import uuid
 from flask import jsonify, send_from_directory
 import yaml
 from werkzeug.utils import secure_filename
-from GeoRAG.RAGAgent import ask_agent, create_db, delete_database, get_all_databases, save_uploaded_file
+from GeoRAGService.RAGAgent import ask_agent, create_db, delete_database, get_all_databases, save_uploaded_file
 
 
 class GeoRAGService:
