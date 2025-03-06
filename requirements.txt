@@ -1,0 +1,9 @@
+flask
+langchain
+langchain-chroma
+langchain-community
+langchain-deepseek
+langchain-ollama
+langchain-openai
+langgraph
+waitress

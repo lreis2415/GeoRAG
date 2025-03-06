@@ -1,0 +1,43 @@
+该YAML文件描述了一个名为“填洼（坡度抬升填平）”的模型相关信息，具体内容如下：
+
+语言设置为中文，模型的唯一缩写为`pitRemove`，版本为1.0。
+
+### 识别信息
+- Docker镜像名称为`taudem_ext:5.3.9`。
+- 模型名称是“填洼（坡度抬升填平）”。
+- 语义为`pit_removing`。
+- 描述为：调整洼地区域高程值，使模拟过程中洼地内水流能顺畅向低处流动的算法。
+- 应用类别为诊断型。
+- 数据类别为栅格DEM数据。
+- 关键词包括地形分析、水文分析、单流向。
+
+### 参数信息
+包含以下参数：
+- `np`：进程数，为mpi计算核数，参数类型为`param`，不可见，数据类型为整数，默认值为1，语义为`number of process`。
+- 空格：填洼算法名称，参数类型为`param`，不可见，数据类型为字符串，默认值为`pitremove`，语义为`name of pit remove algorithm in Taudem`。
+- `z`：数字高程模型，即待填洼DEM，参数类型为`input_data`，数据类型为`tif`，语义为`dem`。
+- `fel`：数字高程模型，即已填洼DEM，参数类型为`output_data`，数据类型为`tif`，语义为`filled_dem`。
+
+### 应用信息
+- 领域：水文分析数据预处理。
+- 目标：调整洼地区域高程值。
+- 机制：识别DEM中的所有凹坑，并将它们的高度提高到边缘附近的最低倾点。
+
+### 操作信息
+- 用法：用户指定待填洼DEM，输出结果为填洼后DEM。
+- 执行示例：`docker run -v $(pwd)/data:/data crazyzlj/taudem_ext:alpine-openmpi-gdal-latest [-np <nproc>] pitremove -z /data/dem_meixi.tif -fel /data/dem_fel.tif`。
+- 输出显示：输出结果为填洼后DEM，直接显示栅格数据。
+
+### 技术信息
+- 语言：C++。
+- 操作系统：Windows、Linux、MacOS。
+- 并行：MPI。
+- 硬件：CPU。
+
+### 来源信息
+- 维护者：Zi-Yue Chen。
+- 组织：Institute of Geographic Sciences and Natural Resources Research。
+- 联系方式：chenzy@lreis.ac.cn。
+- 仓库：https://github.com/lreis2415/TauDEM_ext。
+- 集成软件：TauDEM_ext，版本为TauDEM5.3，许可证为GPLv3license。
+- 参考文献：Planchon, O., Darboux, F. 2002. A fast, simple and versatile algorithm to fill the depressions of digital elevation models. Catena, 46(2 - 3): 159–176。

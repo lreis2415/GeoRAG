@@ -1,0 +1,54 @@
+该文件是关于汇流累积量_D8（栅格）模型的元数据描述，具体信息如下：
+
+语言设定为中文，模型的唯一缩写为AreaD8，版本是1.0。
+
+### 识别信息
+ - Docker镜像名称为taudem_ext:5.3.9。
+ - 模型名称是汇流累积量_D8（栅格）。
+ - 语义为FlowAccumulation。
+ - 描述：汇流累积量算法用于定量指示地表水流受地形控制下的空间分配。
+ - 应用类别为处方型。
+ - 数据类别为栅格数据。
+ - 关键词包括地形分析、水文分析、单流向。
+
+### 参数信息
+ - 第一个参数：
+    - 参数名（arg_name）为np，参数类型（param_type）为param，不可见（visible为false）。
+    - 名称是进程数，描述为mpi计算核数，数据类型（data_type）为整型（int），数据语义为number of process。
+    - 默认值为1。
+ - 第二个参数：
+    - 参数名（arg_name）为空，参数类型（param_type）为param，不可见（visible为false）。
+    - 名称是D8汇流累积量计算，描述为汇流累积量算法名称，数据类型（data_type）为字符串（str），数据语义为name of flow contributing area algorithm in Taudem。
+    - 默认值为aread8。
+ - 第三个参数：
+    - 参数名（arg_name）为p，参数类型（param_type）为input_data。
+    - 名称是D8单流向栅格，描述为D8单流向栅格结果，数据类型（data_type）为tif，数据语义为flow_direction。
+ - 第四个参数：
+    - 参数名（arg_name）为ad8，参数类型（param_type）为output_data。
+    - 名称是d8汇流累积量栅格，描述为d8汇流累积量栅格，数据类型（data_type）为tif，数据语义为flow_accumulation。
+
+### 应用信息
+ - 领域：水文分析数据预处理。
+ - 目标：计算生成汇流累积量。
+ - 前置模型：d8flowdir。
+ - 机理：该算法根据单流向算法计算的水流方向及分配，确定每一个像元上水流的累积量。
+
+### 操作信息
+ - 用法：用户输入数流向，输出汇流累积量。
+ - 执行示例：docker run -v $(pwd)/data:/data crazyzlj/taudem_ext:alpine-openmpi-gdal-latest [-np <nproc>] aread8 -p /data/d8flowdir.tif -ad8 /data/demad8.tif
+ - 输出显示：输出汇流累积量栅格，直接显示。
+
+### 技术信息
+ - 编程语言：C++。
+ - 操作系统：Windows、Linux、MacOS。
+ - 并行技术：MPI。
+ - 硬件：CPU。
+
+### 来源信息
+ - 维护者：Zi-Yue Chen。
+ - 组织：Institute of Geographic Sciences and Natural Resources Research。
+ - 联系方式：chenzy@lreis.ac.cn。
+ - 代码仓库：https://github.com/lreis2415/TauDEM_ext。
+ - 集成软件：
+    - 名称：taudem_ext，版本：TauDEM5.3，许可证：GPLv3license。
+ - 参考文献：O'Callaghan, J. F., Mark, D. M. 1984. The extraction of drainage networks from digital elevation data. Computer Vision, Graphics, and Image Processing, 28(3): 323–344。

@@ -1,8 +1,0 @@
---index https://pypi.douban.com/simple/
-flask
-numpy
-pandas
-waitress
-gdal
-openpyxl
-pyyaml
