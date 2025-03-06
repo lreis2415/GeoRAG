@@ -2,9 +2,12 @@ import os
 import logging
 import uuid
 from flask import jsonify, send_from_directory
+from langchain_ollama import ChatOllama
 import yaml
 from werkzeug.utils import secure_filename
 from GeoRAGService.RAGAgent import ask_agent, create_db, delete_database, get_all_databases, save_uploaded_file
+from langchain_community.chat_models import ChatOpenAI
+from langchain.schema import HumanMessage
 
 
 class GeoRAGService:
@@ -277,6 +280,64 @@ class GeoRAGService:
                 callback=stream_response  # 添加回调函数参数
             )
             return jsonify({"response": "\n".join(response)}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    def chat_with_agent(self, request):
+        """
+        纯对话智能体的接口
+        请求参数:
+            prompt: 系统提示词
+            query: 用户查询
+            chat_model_name: 聊天模型名称 (可选)
+            use_api: 是否使用API (可选，默认True)
+        返回值:
+            智能体的回答
+        """
+        # 获取请求参数
+        prompt = request.json.get("prompt")
+        query = request.json.get("query")
+        use_api = True  # 默认使用 API
+        api_key = os.environ.get("OPENAI_API_KEY")
+        api_base = os.environ.get("OPENAI_API_BASE")
+        
+        # 获取用户指定的模型名称
+        chat_model_name = request.json.get("chat_model_name", self.default_chat_model)
+        
+        # 验证必要参数
+        if not prompt:
+            return jsonify({"error": "prompt is required"}), 400
+        if not query:
+            return jsonify({"error": "query is required"}), 400
+        
+        # 验证模型是否存在
+        if chat_model_name not in self.get_available_chat_models():
+            return jsonify({"error": f"Chat model '{chat_model_name}' is not available"}), 400
+        
+        try:
+            # 创建LLM
+            llm = (ChatOpenAI(
+                model=chat_model_name,
+                temperature=0.1,
+                verbose=True,
+                api_key=api_key,
+                base_url=api_base
+            ) if use_api else ChatOllama(
+                model=chat_model_name,
+                temperature=0.1,
+                verbose=True
+            ))
+            
+            # 准备消息
+            messages = [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": query}
+            ]
+            
+            # 获取回答
+            response = llm.invoke(messages)
+            return jsonify({"response": response.content}), 200
+            
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 

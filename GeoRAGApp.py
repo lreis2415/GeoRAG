@@ -69,6 +69,10 @@ def create_database():
 def ask_question():
     return georag_service.ask_question(request)
 
+@app.route('/chat', methods=['POST'])
+def chat_with_agent():
+    return georag_service.chat_with_agent(request)
+
 if __name__ == '__main__':
     # 使用waitress运行Flask应用，挂载到0.0.0.0:7512
     serve(app, host='0.0.0.0', port=7512)
