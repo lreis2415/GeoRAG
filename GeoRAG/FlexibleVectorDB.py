@@ -15,9 +15,9 @@ class CustomEmbeddings(Embeddings):
         self.model_name = model_name
         # 从环境变量获取 API key
         load_dotenv()
-        api_key = os.environ.get("QWEN_API_KEY")
+        api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            raise ValueError("未找到 QWEN_API_KEY 环境变量，请确保已正确设置")
+            raise ValueError("未找到 OPENAI_API_KEY 环境变量，请确保已正确设置")
             
         self.client = OpenAI(
             api_key=api_key,

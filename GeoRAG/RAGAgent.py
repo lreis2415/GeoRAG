@@ -15,8 +15,8 @@ from .LocalVectorDB import LocalVectorDBChroma
 
 # 加载环境变量
 load_dotenv()
-openai_api_key = os.environ.get("QWEN_API_KEY")
-openai_api_base = os.environ.get("QWEN_API_BASE")
+openai_api_key = os.environ.get("OPENAI_API_KEY")
+openai_api_base = os.environ.get("OPENAI_API_BASE")
 embedding_api_url = os.environ.get("EMBEDDING_API_URL")
 
 # 配置路径

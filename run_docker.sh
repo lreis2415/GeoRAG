@@ -20,7 +20,8 @@ fi
 echo "正在启动容器..."
 docker run -it -d \
     -p 0.0.0.0:7512:7512 \
-    --name georag_service \
+    --name georag_service_api \
+    -e OPEN_API_KEY_API_KEY=your_custom_api_key \
     casetest:1.0
 
 # 检查容器是否成功启动

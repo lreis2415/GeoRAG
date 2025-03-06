@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List
 from langchain_core.documents import Document
-from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
 
 class VectorDB(ABC):
