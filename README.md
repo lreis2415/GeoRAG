@@ -30,7 +30,6 @@ GeoRAG 是一个基于Retrieval-Augmented Generation (RAG) 技术的地理信息
    python GeoRAGApp.py
    ```
 
-
 ## 使用说明
 ### 文档管理
 - 上传文档：POST /databases/add
@@ -123,3 +122,24 @@ GeoRAG 是一个基于Retrieval-Augmented Generation (RAG) 技术的地理信息
   - embed_model_name: 嵌入模型名称（可选）
   - chat_model_name: 聊天模型名称（可选）
   - use_api: 是否使用API（可选，默认True）
+
+## 项目结构
+```
+GeoRAG/
+├── .gitignore
+├── Dockerfile
+├── GeoRAGApp.py  # 主应用程序入口文件
+├── models.yaml  # 模型配置文件，定义了可用的嵌入模型和聊天模型
+├── README.md
+├── requirements.txt  # 依赖包列表
+├── run_docker.sh  # 运行Docker容器的脚本
+└── GeoRAGService/  # 服务模块目录
+    ├── __init__.py
+    ├── FlexibleVectorDB.py  # 灵活的向量数据库实现
+    ├── georag_service.py  # 核心服务逻辑
+    ├── LocalVectorDB.py  # 本地向量数据库实现(Ollama)
+    ├── RAGAgent.py  # RAG代理类，处理智能问答逻辑
+    ├── VectorDB.py  # 向量数据库抽象基类
+    └── database/  # 数据库存储目录
+    └── documents/  # 文档存储目录
+```
