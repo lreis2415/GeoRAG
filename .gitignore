@@ -3,6 +3,7 @@
 *.log
 
 # 忽略向量数据库相关文件
+*.txt
 *.bin
 *.pyc
 *.sqlite3
