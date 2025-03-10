@@ -27,15 +27,25 @@ class CustomEmbeddings(Embeddings):
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """实现文档嵌入方法"""
         try:
-            # 使用 OpenAI 客户端创建嵌入
-            response = self.client.embeddings.create(
-                model=self.model_name,
-                input=texts,
-                dimensions=1024,
-                encoding_format="float"
-            )
-            # 从响应中提取嵌入向量
-            return [item.embedding for item in response.data]
+            # 分批处理，每批最多10个文本
+            batch_size = 10
+            all_embeddings = []
+            # print(f"开始嵌入 {len(texts)} 个文本")
+            
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i:i + batch_size]
+                # 使用 OpenAI 客户端创建嵌入
+                response = self.client.embeddings.create(
+                    model=self.model_name,
+                    input=batch,
+                    dimensions=1024,
+                    encoding_format="float"
+                )
+                # 从响应中提取嵌入向量并添加到结果列表
+                batch_embeddings = [item.embedding for item in response.data]
+                all_embeddings.extend(batch_embeddings)
+                
+            return all_embeddings
         except Exception as e:
             raise Exception(f"嵌入 API 调用失败: {str(e)}")
             
@@ -83,7 +93,7 @@ class FlexibleVectorDB(VectorDB):
             embedding_function=self._embeddings
         )
 
-    def embed_documents(self, documents: List[Document], batch_size: int = 32) -> None:
+    def embed_documents(self, documents: List[Document], batch_size: int = 10) -> None:
         """嵌入文档"""
         from langchain_chroma import Chroma
 
@@ -92,6 +102,7 @@ class FlexibleVectorDB(VectorDB):
             embedding_function=self._embeddings
         )
 
+        # print(f"开始嵌入 {len(documents)} 个文档")
         for i in range(0, len(documents), batch_size):
             batch = documents[i:i + batch_size]
             vectordb.add_documents(batch)
