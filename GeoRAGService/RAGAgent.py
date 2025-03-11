@@ -101,9 +101,24 @@ def ask_agent(
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
     vector_db: Optional[VectorDB] = None,
-    callback = None  # 添加回调函数参数
+    callback = None,  # 添加回调函数参数
+    prompt: Optional[str] = None,  # 添加prompt参数
+    use_tools: bool = True 
 ):
-    """运行RAG智能体"""
+    """
+    运行RAG智能体
+    
+    Args:
+        chat_model_name: 聊天模型名称
+        query: 用户查询
+        use_api: 是否使用API
+        api_key: API密钥
+        api_base: API基础URL
+        vector_db: 向量数据库
+        callback: 回调函数
+        prompt: 自定义系统提示词
+        use_tools: 是否使用RAG工具，默认为True
+    """
     
     # 创建检索器
     vector_store = vector_db.get_vector_store()
@@ -111,14 +126,16 @@ def ask_agent(
         search_type="similarity",
         search_kwargs={"k": 2}
     )
-    
-    # 创建工具
-    tools = [
-        retriever.as_tool(
-            name="info_retriever",
-            description="查询信息"
-        )
-    ]
+    if use_tools:
+        # 创建工具
+        tools = [
+            retriever.as_tool(
+                name="info_retriever",
+                description="信息检索工具"
+            )
+        ]
+    else:
+        tools = []
     
     # 创建LLM
     llm = (ChatOpenAI(
@@ -126,7 +143,8 @@ def ask_agent(
             temperature=0.1,
             verbose=True,
             api_key=api_key,
-            base_url=api_base
+            base_url=api_base,
+            streaming=True
         ) if use_api else ChatOllama(
             model=chat_model_name,
             temperature=0.1,
@@ -136,8 +154,18 @@ def ask_agent(
     # 创建智能体
     agent = create_react_agent(llm, tools)
     
+    # 准备消息
+    messages = []
+    
+    # 如果提供了自定义提示词，添加系统消息
+    if prompt:
+        messages.append(("system", prompt))
+    
+    # 添加用户查询
+    messages.append(("human", query))
+    
     # 运行智能体
-    for chunk in agent.stream({"messages": [("human", query)]}):
+    for chunk in agent.stream({"messages": messages}):
         # 如果提供了回调函数，调用它
         if callback:
             callback(chunk)

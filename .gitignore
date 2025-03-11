@@ -8,6 +8,7 @@
 *.pyc
 *.sqlite3
 *.DS_Store
+*.json
 
 # 忽略配置变量
 *.env
