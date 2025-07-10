@@ -11,18 +11,31 @@ class CustomEmbeddings(Embeddings):
     """自定义嵌入函数类，实现 LangChain 的 Embeddings 接口"""
     
     def __init__(self, api_url: str, model_name: str):
+        if not api_url:
+            raise ValueError("api_url 不能为空，请确保设置了 EMBEDDING_API_URL 环境变量")
+        if not model_name:
+            raise ValueError("model_name 不能为空")
+            
         self.api_url = api_url
         self.model_name = model_name
+        
         # 从环境变量获取 API key
         load_dotenv()
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("未找到 OPENAI_API_KEY 环境变量，请确保已正确设置")
             
-        self.client = OpenAI(
-            api_key=api_key,
-            base_url=api_url
-        )
+        try:
+            self.client = OpenAI(
+                api_key=api_key,
+                base_url=api_url
+            )
+            # 测试连接
+            print(f"✅ OpenAI 客户端初始化成功")
+            print(f"   API URL: {api_url}")
+            print(f"   模型名称: {model_name}")
+        except Exception as e:
+            raise ValueError(f"OpenAI 客户端初始化失败: {str(e)}")
         
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """实现文档嵌入方法"""
@@ -30,24 +43,36 @@ class CustomEmbeddings(Embeddings):
             # 分批处理，每批最多10个文本
             batch_size = 10
             all_embeddings = []
-            # print(f"开始嵌入 {len(texts)} 个文本")
+            print(f"🔄 开始嵌入 {len(texts)} 个文本，批次大小：{batch_size}")
             
             for i in range(0, len(texts), batch_size):
                 batch = texts[i:i + batch_size]
+                print(f"   处理批次 {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size}")
+                
                 # 使用 OpenAI 客户端创建嵌入
                 response = self.client.embeddings.create(
                     model=self.model_name,
-                    input=batch,
-                    dimensions=1024,
-                    encoding_format="float"
+                    input=batch
                 )
+                
                 # 从响应中提取嵌入向量并添加到结果列表
                 batch_embeddings = [item.embedding for item in response.data]
                 all_embeddings.extend(batch_embeddings)
+                print(f"   ✅ 批次 {i//batch_size + 1} 完成，获得 {len(batch_embeddings)} 个嵌入向量")
                 
+            print(f"✅ 所有文本嵌入完成，共 {len(all_embeddings)} 个向量")
             return all_embeddings
+            
         except Exception as e:
-            raise Exception(f"嵌入 API 调用失败: {str(e)}")
+            error_msg = f"嵌入 API 调用失败: {str(e)}"
+            print(f"❌ {error_msg}")
+            # 打印更多调试信息
+            print(f"   模型名称: {self.model_name}")
+            print(f"   API URL: {self.api_url}")
+            print(f"   文本数量: {len(texts)}")
+            if texts:
+                print(f"   首个文本预览: {texts[0][:100]}...")
+            raise Exception(error_msg)
             
     def embed_query(self, text: str) -> List[float]:
         """实现查询嵌入方法"""
@@ -75,6 +100,14 @@ class FlexibleVectorDB(VectorDB):
             delimiter: CSV 文件分隔符，默认为逗号。
             text_splitter_config: 分词器配置。
         """
+        # 验证必要参数
+        if not embedding_api_url:
+            raise ValueError("embedding_api_url 不能为空，请确保设置了 EMBEDDING_API_URL 环境变量")
+        if not model_name:
+            raise ValueError("model_name 不能为空")
+        if not persist_directory:
+            raise ValueError("persist_directory 不能为空")
+            
         self._embedding_api_url = embedding_api_url
         self._model_name = model_name
         self._persist_directory = persist_directory
@@ -83,7 +116,12 @@ class FlexibleVectorDB(VectorDB):
             "chunk_size": 1000,
             "chunk_overlap": 200
         }
-        self._embeddings = CustomEmbeddings(embedding_api_url, model_name)
+        
+        # 创建自定义嵌入函数
+        try:
+            self._embeddings = CustomEmbeddings(embedding_api_url, model_name)
+        except Exception as e:
+            raise ValueError(f"初始化嵌入函数失败: {str(e)}")
 
     def get_vector_store(self):
         """获取向量存储"""
@@ -145,17 +183,47 @@ class FlexibleVectorDB(VectorDB):
 
     def embed_txt(self, file_path: str, encoding: str = "utf-8") -> None:
         """嵌入 TXT 文件"""
-        from langchain_community.document_loaders import TextLoader
-        from langchain.text_splitter import RecursiveCharacterTextSplitter
+        try:
+            print(f"📄 开始处理 TXT 文件: {file_path}")
+            
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"文件不存在: {file_path}")
+            
+            # 获取文件大小
+            file_size = os.path.getsize(file_path)
+            print(f"   文件大小: {file_size} 字节")
+            
+            from langchain_community.document_loaders import TextLoader
+            from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-        loader = TextLoader(file_path, encoding=encoding)
-        docs = loader.load()
+            # 加载文件
+            print(f"   正在加载文件，编码: {encoding}")
+            loader = TextLoader(file_path, encoding=encoding)
+            docs = loader.load()
+            print(f"   ✅ 文件加载成功，获得 {len(docs)} 个文档")
+            
+            if docs:
+                print(f"   首个文档内容长度: {len(docs[0].page_content)} 字符")
+                print(f"   首个文档内容预览: {docs[0].page_content[:200]}...")
 
-        text_splitter = RecursiveCharacterTextSplitter(
-            **self._text_splitter_config
-        )
-        documents = text_splitter.split_documents(docs)
-        self.embed_documents(documents)
+            # 分割文档
+            print(f"   正在分割文档，配置: {self._text_splitter_config}")
+            text_splitter = RecursiveCharacterTextSplitter(
+                **self._text_splitter_config
+            )
+            documents = text_splitter.split_documents(docs)
+            print(f"   ✅ 文档分割完成，共 {len(documents)} 个文档块")
+            
+            # 嵌入文档
+            print(f"   开始嵌入文档...")
+            self.embed_documents(documents)
+            print(f"✅ TXT 文件处理完成: {file_path}")
+            
+        except Exception as e:
+            error_msg = f"处理 TXT 文件失败 {file_path}: {str(e)}"
+            print(f"❌ {error_msg}")
+            raise Exception(error_msg)
 
     def embed_webpage(self, url: str) -> None:
         """嵌入网页"""

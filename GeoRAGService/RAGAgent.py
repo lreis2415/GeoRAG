@@ -67,6 +67,10 @@ def create_db(model_name: str, db_name: str, file_paths: List[str] = None, vecto
     Returns:
         VectorDB: 向量数据库实例
     """
+    # 验证必要的环境变量
+    if not embedding_api_url:
+        raise ValueError("未设置 EMBEDDING_API_URL 环境变量，请在 .env 文件中设置该变量")
+    
     persist_directory = get_persist_directory(db_name)
     
     if vector_db is None:
@@ -74,23 +78,34 @@ def create_db(model_name: str, db_name: str, file_paths: List[str] = None, vecto
         #     model_name=model_name,
         #     persist_directory=persist_directory
         # )
-        vector_db = FlexibleVectorDB(
-            embedding_api_url=embedding_api_url,
-            model_name=model_name,
-            persist_directory=persist_directory
-        )
+        try:
+            vector_db = FlexibleVectorDB(
+                embedding_api_url=embedding_api_url,
+                model_name=model_name,
+                persist_directory=persist_directory
+            )
+        except Exception as e:
+            raise ValueError(f"创建向量数据库失败: {str(e)}")
     
     # 如果提供了文件路径，则嵌入这些文件
     if file_paths and not os.path.exists(persist_directory):
-        for file_path in file_paths:
-            if file_path.endswith('.csv'):
-                vector_db.embed_csv(file_path)
-            elif file_path.endswith('.json'):
-                vector_db.embed_json(file_path)
-            elif file_path.endswith('.txt'):
-                vector_db.embed_txt(file_path)
-            elif file_path.startswith('http'):
-                vector_db.embed_webpage(file_path)
+        try:
+            for file_path in file_paths:
+                if not os.path.exists(file_path):
+                    raise ValueError(f"文件不存在: {file_path}")
+                    
+                if file_path.endswith('.csv'):
+                    vector_db.embed_csv(file_path)
+                elif file_path.endswith('.json'):
+                    vector_db.embed_json(file_path)
+                elif file_path.endswith('.txt'):
+                    vector_db.embed_txt(file_path)
+                elif file_path.startswith('http'):
+                    vector_db.embed_webpage(file_path)
+                else:
+                    raise ValueError(f"不支持的文件类型: {file_path}")
+        except Exception as e:
+            raise ValueError(f"嵌入文件失败: {str(e)}")
         
     return vector_db
 
