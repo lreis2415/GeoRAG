@@ -7,7 +7,12 @@ import yaml
 from werkzeug.utils import secure_filename
 from GeoRAGService.RAGAgent import ask_agent, create_db, delete_database, get_all_databases, save_uploaded_file
 from langchain_community.chat_models import ChatOpenAI
-from langchain.schema import HumanMessage
+from langchain.schema import HumanMessage, SystemMessage, AIMessage
+from langchain.memory import ConversationBufferMemory
+from langchain.schema.messages import BaseMessage
+from typing import Dict, List, Optional
+import json
+from datetime import datetime
 
 
 class GeoRAGService:
@@ -21,10 +26,106 @@ class GeoRAGService:
         self.upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'documents')
         os.makedirs(self.upload_folder, exist_ok=True)
         
+        # 添加会话管理
+        self.chat_sessions = {}  # 存储会话记录 {session_id: {"memory": ConversationBufferMemory, "created_at": datetime, "last_active": datetime}}
+        self.max_sessions = 100  # 最大会话数
+        self.max_memory_length = 20  # 每个会话最大记忆轮次
+        
     def allowed_file(self, filename):
         """检查文件是否允许上传"""
         return '.' in filename and filename.rsplit('.', 1)[1].lower() in self.allowed_extensions
     
+    def _create_session(self, session_id: str = None) -> str:
+        """创建或获取会话"""
+        if session_id is None:
+            session_id = str(uuid.uuid4())
+        
+        if session_id not in self.chat_sessions:
+            # 检查会话数量限制
+            if len(self.chat_sessions) >= self.max_sessions:
+                self._cleanup_old_sessions()
+            
+            # 创建新会话
+            memory = ConversationBufferMemory(
+                memory_key="chat_history",
+                return_messages=True,
+                max_token_limit=4000  # 控制token数量
+            )
+            
+            self.chat_sessions[session_id] = {
+                "memory": memory,
+                "created_at": datetime.now(),
+                "last_active": datetime.now(),
+                "message_count": 0
+            }
+            
+        return session_id
+    
+    def _cleanup_old_sessions(self):
+        """清理最老的会话"""
+        # 按最后活跃时间排序，删除最老的会话
+        sorted_sessions = sorted(
+            self.chat_sessions.items(),
+            key=lambda x: x[1]["last_active"]
+        )
+        
+        # 删除最老的10个会话
+        for session_id, _ in sorted_sessions[:10]:
+            del self.chat_sessions[session_id]
+    
+    def _update_session_activity(self, session_id: str):
+        """更新会话活跃时间"""
+        if session_id in self.chat_sessions:
+            self.chat_sessions[session_id]["last_active"] = datetime.now()
+    
+    def _add_to_memory(self, session_id: str, human_message: str, ai_message: str):
+        """添加对话到记忆中"""
+        if session_id in self.chat_sessions:
+            session = self.chat_sessions[session_id]
+            memory = session["memory"]
+            
+            # 添加到记忆中
+            memory.chat_memory.add_user_message(human_message)
+            memory.chat_memory.add_ai_message(ai_message)
+            
+            # 更新消息计数
+            session["message_count"] += 1
+            
+            # 如果消息数量超过限制，删除最早的消息
+            if session["message_count"] > self.max_memory_length:
+                messages = memory.chat_memory.messages
+                if len(messages) > 4:  # 至少保留2轮对话
+                    memory.chat_memory.messages = messages[2:]  # 删除最早的一轮对话
+                    session["message_count"] -= 1
+    
+    def _get_conversation_history(self, session_id: str) -> List[BaseMessage]:
+        """获取会话历史"""
+        if session_id in self.chat_sessions:
+            return self.chat_sessions[session_id]["memory"].chat_memory.messages
+        return []
+    
+    def get_chat_sessions(self):
+        """获取所有会话信息"""
+        sessions_info = {}
+        for session_id, session in self.chat_sessions.items():
+            sessions_info[session_id] = {
+                "created_at": session["created_at"].isoformat(),
+                "last_active": session["last_active"].isoformat(),
+                "message_count": session["message_count"]
+            }
+        return sessions_info
+    
+    def delete_chat_session(self, session_id: str):
+        """删除指定会话"""
+        if session_id in self.chat_sessions:
+            del self.chat_sessions[session_id]
+            return True
+        return False
+    
+    def clear_all_sessions(self):
+        """清空所有会话"""
+        self.chat_sessions.clear()
+            
     def get_available_embedding_models(self):
         """
         获取当前系统中可用的嵌入模型列表。
@@ -285,18 +386,22 @@ class GeoRAGService:
 
     def chat_with_agent(self, request):
         """
-        纯对话智能体的接口
+        纯对话智能体的接口 - 支持记忆功能
         请求参数:
             prompt: 系统提示词
             query: 用户查询
             chat_model_name: 聊天模型名称 (可选)
             use_api: 是否使用API (可选，默认True)
+            session_id: 会话ID (可选，如果不提供则创建新会话)
+            use_memory: 是否使用记忆功能 (可选，默认True)
         返回值:
-            智能体的回答
+            智能体的回答和会话ID
         """
         # 获取请求参数
         prompt = request.json.get("prompt")
         query = request.json.get("query")
+        session_id = request.json.get("session_id")
+        use_memory = request.json.get("use_memory", True)
         use_api = True  # 默认使用 API
         api_key = os.environ.get("OPENAI_API_KEY")
         api_base = os.environ.get("OPENAI_API_BASE")
@@ -328,15 +433,88 @@ class GeoRAGService:
                 verbose=True
             ))
             
-            # 准备消息
-            messages = [
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": query}
-            ]
+            # 处理会话和记忆
+            if use_memory:
+                # 创建或获取会话
+                session_id = self._create_session(session_id)
+                self._update_session_activity(session_id)
+                
+                # 获取历史对话
+                history = self._get_conversation_history(session_id)
+                
+                # 构建消息列表
+                messages = []
+                
+                # 添加系统提示词
+                messages.append(SystemMessage(content=prompt))
+                
+                # 添加历史对话
+                for msg in history:
+                    messages.append(msg)
+                
+                # 添加当前用户查询
+                messages.append(HumanMessage(content=query))
+                
+                # 获取回答
+                response = llm.invoke(messages)
+                ai_response = response.content
+                
+                # 将对话添加到记忆中
+                self._add_to_memory(session_id, query, ai_response)
+                
+                return jsonify({
+                    "response": ai_response,
+                    "session_id": session_id,
+                    "message_count": self.chat_sessions[session_id]["message_count"]
+                }), 200
+                
+            else:
+                # 不使用记忆，简单的一次性对话
+                messages = [
+                    SystemMessage(content=prompt),
+                    HumanMessage(content=query)
+                ]
+                
+                response = llm.invoke(messages)
+                return jsonify({"response": response.content}), 200
             
-            # 获取回答
-            response = llm.invoke(messages)
-            return jsonify({"response": response.content}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    
+    def get_chat_history(self, request):
+        """
+        获取会话历史记录
+        请求参数:
+            session_id: 会话ID
+        返回值:
+            历史对话记录
+        """
+        session_id = request.json.get("session_id")
+        
+        if not session_id:
+            return jsonify({"error": "session_id is required"}), 400
+        
+        if session_id not in self.chat_sessions:
+            return jsonify({"error": "Session not found"}), 404
+        
+        try:
+            history = self._get_conversation_history(session_id)
+            
+            # 格式化历史记录
+            formatted_history = []
+            for msg in history:
+                if isinstance(msg, HumanMessage):
+                    formatted_history.append({"role": "user", "content": msg.content})
+                elif isinstance(msg, AIMessage):
+                    formatted_history.append({"role": "assistant", "content": msg.content})
+                elif isinstance(msg, SystemMessage):
+                    formatted_history.append({"role": "system", "content": msg.content})
+            
+            return jsonify({
+                "session_id": session_id,
+                "history": formatted_history,
+                "message_count": self.chat_sessions[session_id]["message_count"]
+            }), 200
             
         except Exception as e:
             return jsonify({"error": str(e)}), 500
