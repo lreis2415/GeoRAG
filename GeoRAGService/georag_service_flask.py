@@ -1,8 +1,7 @@
 import os
 import logging
 import uuid
-from fastapi import HTTPException
-from fastapi.responses import JSONResponse, FileResponse
+from flask import jsonify, send_from_directory
 from langchain_ollama import ChatOllama
 import yaml
 from werkzeug.utils import secure_filename
@@ -12,15 +11,21 @@ from langchain.schema import HumanMessage, SystemMessage, AIMessage
 from langchain.memory import ConversationBufferMemory
 from langchain.schema.messages import BaseMessage
 from typing import Dict, List, Optional
+import json
 from datetime import datetime
+import asyncio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from langchain_mcp_adapters.tools import load_mcp_tools
-from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.prebuilt import create_react_agent
-from langchain.tools import tool
+
 
 # MCP服务配置
+server_params = StdioServerParameters(
+    command="/opt/homebrew/bin/uv",
+    args=["--directory", "/Users/wuchenglong/Documents/LLM/MCP-Geo", "run", "geo_cal.py"],
+)
+
 MCP_CONFIG = {
     "calculator-mcp": {
       "command": "/opt/homebrew/bin/uv",
@@ -29,35 +34,16 @@ MCP_CONFIG = {
         "/Users/wuchenglong/Documents/LLM/MCP-Geo",
         "run",
         "geo_cal.py"
-      ],
-      "transport": "stdio"
+      ]
     },
     "pygeomodels": {
         "command": "/opt/homebrew/Caskroom/miniconda/base/envs/gptac_new/bin/python",
         "args": [
             "/Users/wuchenglong/Desktop/GraduationDesigh/pygeomodels/pygeomodels_service.py"
-        ],
-        "transport": "stdio"
+        ]
     }
 }
 
-
-# Function Call tool 封装示例（实际上本项目没用到，仅供学习参考）
-# 使用时，仅需将 self.mcp_tools = None 改为 self.mcp_tools = tools 即可
-# 查询当前时间的工具。返回结果示例：“当前时间：2024-04-15 17:15:18。“
-@tool("get_current_time", return_direct=True)
-def get_current_time():
-    """
-    获取当前时间
-    """
-    # 获取当前日期和时间
-    current_datetime = datetime.now()
-    # 格式化当前日期和时间
-    formatted_time = current_datetime.strftime("%Y-%m-%d %H:%M:%S")
-    # 返回格式化后的当前时间
-    return f"当前时间：{formatted_time}。"
-
-tools = [get_current_time]
 
 class GeoRAGService:
     def __init__(self):
@@ -68,11 +54,7 @@ class GeoRAGService:
         # 初始化MCP适配器
         self.mcp_tools = None
         self.mcp_session = None
-        self.mcp_config = MCP_CONFIG["calculator-mcp"]
-        self.mcp_server_params = StdioServerParameters(
-            command=self.mcp_config["command"],
-            args=self.mcp_config["args"],
-        )
+        asyncio.run(self._init_mcp_tools())
         
         # 设置上传目录
         self.upload_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'documents')
@@ -85,36 +67,27 @@ class GeoRAGService:
         
     async def _init_mcp_tools(self):
         """初始化 MCP 工具"""
-        # 思路1：创建 MCP 客户端，client.get_tools()，成功！
-        client = MultiServerMCPClient( MCP_CONFIG )   
-        # 加载 MCP 工具
-        self.mcp_tools = await client.get_tools()
-        self.mcp_session = client
-        logging.info("MCP tools initialized successfully.")
-        
-        # 思路2：创建 MCP 客户端，load_mcp_tools(session)，没有成功
-        # client = MultiServerMCPClient(MCP_CONFIG)
-        # async with client.session("calculator-mcp") as session:
-        #     tools = await load_mcp_tools(session)
-        #     self.mcp_tools = tools
-        #     self.mcp_session = session
-        #     logging.info("MCP tools initialized successfully.")
-        
-        # 思路3：启动 MCP 服务器会话并加载工具，load_mcp_tools(session)，没有成功
+        try:
+            # 使用第一个 MCP 配置（calculator-mcp）
+            config = MCP_CONFIG["calculator-mcp"]
+            server_params = StdioServerParameters(
+                command=config["command"],
+                args=config["args"],
+            )
 
-        # try:
-        #     async with stdio_client(self.mcp_server_params) as (read, write):
-        #         async with ClientSession(read, write) as session:
-        #             await session.initialize()
-        #             # 加载 MCP 工具
-        #             tools = await load_mcp_tools(session)
-        #             self.mcp_tools = tools
-        #             self.mcp_session = session
-        #             logging.info("MCP tools initialized successfully.")
-        # except Exception as e:
-        #     logging.error(f"Failed to initialize MCP tools: {e}")
-        #     self.mcp_tools = []
-        #     self.mcp_session = None
+            # 启动 MCP 服务器会话并加载工具
+            async with stdio_client(server_params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    # 加载 MCP 工具
+                    tools = await load_mcp_tools(session)
+                    self.mcp_tools = tools
+                    self.mcp_session = session
+                    logging.info("MCP tools initialized successfully.")
+        except Exception as e:
+            logging.error(f"Failed to initialize MCP tools: {e}")
+            self.mcp_tools = []
+            self.mcp_session = None
     def allowed_file(self, filename):
         """检查文件是否允许上传"""
         return '.' in filename and filename.rsplit('.', 1)[1].lower() in self.allowed_extensions
@@ -244,9 +217,9 @@ class GeoRAGService:
         """
         try:
             databases = get_all_databases()
-            return JSONResponse(content={"databases": databases}, status_code=200)
+            return jsonify({"databases": databases}), 200
         except Exception as e:
-            return JSONResponse(content={"error": str(e)}, status_code=500)
+            return jsonify({"error": str(e)}), 500
 
     def create_database(self, request):
         """
@@ -264,13 +237,13 @@ class GeoRAGService:
         
         # 验证必要参数
         if not model_name:
-            raise HTTPException(status_code=400, detail="model_name is required")
+            return jsonify({"error": "model_name is required"}), 400
         if not db_name:
-            raise HTTPException(status_code=400, detail="db_name is required")
+            return jsonify({"error": "db_name is required"}), 400
         
         # 验证模型是否存在
         if model_name not in self.get_available_embedding_models():
-            raise HTTPException(status_code=400, detail=f"Embedding model '{model_name}' is not available")
+            return jsonify({"error": f"Embedding model '{model_name}' is not available"}), 400
         
         try:
             # 处理上传的文件
@@ -288,14 +261,14 @@ class GeoRAGService:
             
             # 创建数据库
             self.vector_dbs[db_name] = create_db(model_name, db_name, file_paths)
-            return JSONResponse(content={
+            return jsonify({
                 "message": f"Database '{db_name}' created successfully",
                 "db_name": db_name,
                 "model_name": model_name,
                 "files_processed": len(file_paths)
-            }, status_code=200)
+            }), 200
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            return jsonify({"error": str(e)}), 500
     
     def add_files_to_database(self, request):
         """
@@ -311,11 +284,11 @@ class GeoRAGService:
         
         # 验证必要参数
         if not db_name:
-            raise HTTPException(status_code=400, detail="db_name is required")
+            return jsonify({"error": "db_name is required"}), 400
         
         # 验证知识库是否存在
         if db_name not in self.vector_dbs:
-            raise HTTPException(status_code=404, detail=f"Database '{db_name}' not found")
+            return jsonify({"error": f"Database '{db_name}' not found"}), 404
         
         # 处理上传的文件
         file_paths = []
@@ -332,15 +305,15 @@ class GeoRAGService:
         # 更新知识库
         try:
             self.vector_dbs[db_name].add_files(file_paths)  # 假设 VectorDB 支持 add_files 方法
-            return JSONResponse(content={
+            return jsonify({
                 "message": f"Files added to database '{db_name}' successfully",
                 "db_name": db_name,
                 "files_processed": len(file_paths)
-            }, status_code=200)
+            }), 200
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            return jsonify({"error": str(e)}), 500
 
-    def delete_db(self, db_name):
+    def delete_db(self,db_name):
         """
         删除指定知识库
         路径参数:
@@ -356,11 +329,11 @@ class GeoRAGService:
             # 从磁盘中删除
             success = delete_database(db_name)
             if success:
-                return JSONResponse(content={"message": f"Database '{db_name}' deleted successfully"}, status_code=200)
+                return jsonify({"message": f"Database '{db_name}' deleted successfully"}), 200
             else:
-                return JSONResponse(content={"error": f"Database '{db_name}' not found"}, status_code=404)
+                return jsonify({"error": f"Database '{db_name}' not found"}), 404
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            return jsonify({"error": str(e)}), 500
 
     def get_documents(self):
         """
@@ -369,12 +342,13 @@ class GeoRAGService:
             文件列表
         """
         try:
+            print(self.upload_folder)
             if not os.path.exists(self.upload_folder):
-                return JSONResponse(content={"documents": []}, status_code=200)
+                return {"documents": []}  # 直接返回字典而不是使用 jsonify
             documents = [f for f in os.listdir(self.upload_folder) if os.path.isfile(os.path.join(self.upload_folder, f))]
-            return JSONResponse(content={"documents": documents}, status_code=200)
+            return {"documents": documents}  # 直接返回字典而不是使用 jsonify
         except Exception as e:
-            return JSONResponse(content={"error": str(e)}, status_code=500)
+            return {"error": str(e)}, 500  # 错误情况下也直接返回字典
 
     def download_document(self, filename):
         """
@@ -385,9 +359,9 @@ class GeoRAGService:
             文件内容
         """
         try:
-            return FileResponse(path=os.path.join(self.upload_folder, filename))
+            return send_from_directory(self.upload_folder, filename)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            return jsonify({"error": str(e)}), 500
 
 
     def delete_document(self, filename):
@@ -402,11 +376,11 @@ class GeoRAGService:
             file_path = os.path.join(self.upload_folder, filename)
             if os.path.exists(file_path):
                 os.remove(file_path)
-                return JSONResponse(content={"message": f"Document '{filename}' deleted successfully"}, status_code=200)
+                return jsonify({"message": f"Document '{filename}' deleted successfully"}), 200
             else:
-                return JSONResponse(content={"error": f"Document '{filename}' not found"}, status_code=404)
+                return jsonify({"error": f"Document '{filename}' not found"}), 404
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            return jsonify({"error": str(e)}), 500
 
     def ask_question(self, request):
         """
@@ -432,18 +406,18 @@ class GeoRAGService:
         
         # 验证必要参数
         if not query:
-            raise HTTPException(status_code=400, detail="query is required")
+            return jsonify({"error": "query is required"}), 400
         if not db_name:
-            raise HTTPException(status_code=400, detail="db_name is required")
+            return jsonify({"error": "db_name is required"}), 400
         
         # 验证模型是否存在
         if chat_model_name not in self.get_available_chat_models():
-            raise HTTPException(status_code=400, detail=f"Chat model '{chat_model_name}' is not available")
+            return jsonify({"error": f"Chat model '{chat_model_name}' is not available"}), 400
         
         try:
             # 获取向量数据库
             vector_db = self.vector_dbs.get(db_name)
-            print("db", vector_db)
+            print("db",vector_db)
             response = []
             def stream_response(chunk):
                 if "agent" in chunk:
@@ -463,11 +437,11 @@ class GeoRAGService:
                 vector_db=vector_db,
                 callback=stream_response  # 添加回调函数参数
             )
-            return JSONResponse(content={"response": "\n".join(response)}, status_code=200)
+            return jsonify({"response": "\n".join(response)}), 200
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            return jsonify({"error": str(e)}), 500
 
-    async def chat_with_agent(self, request):
+    def chat_with_agent(self, request):
         """
         纯对话智能体的接口 - 支持记忆功能
         请求参数:
@@ -481,24 +455,26 @@ class GeoRAGService:
             智能体的回答和会话ID
         """
         # 获取请求参数
-        prompt = request.prompt
-        query = request.query
-        session_id = request.session_id
-        use_memory = request.use_memory
+        prompt = request.json.get("prompt")
+        query = request.json.get("query")
+        session_id = request.json.get("session_id")
+        use_memory = request.json.get("use_memory", True)
         use_api = True  # 默认使用 API
         api_key = os.environ.get("OPENAI_API_KEY")
         api_base = os.environ.get("OPENAI_API_BASE")
-        chat_model_name = request.chat_model_name if request.chat_model_name else self.default_chat_model
+        
+        # 获取用户指定的模型名称
+        chat_model_name = request.json.get("chat_model_name", self.default_chat_model)
         
         # 验证必要参数
         if not prompt:
-            raise HTTPException(status_code=400, detail="prompt is required")
+            return jsonify({"error": "prompt is required"}), 400
         if not query:
-            raise HTTPException(status_code=400, detail="query is required")
+            return jsonify({"error": "query is required"}), 400
         
         # 验证模型是否存在
         if chat_model_name not in self.get_available_chat_models():
-            raise HTTPException(status_code=400, detail=f"Chat model '{chat_model_name}' is not available")
+            return jsonify({"error": f"Chat model '{chat_model_name}' is not available"}), 400
         
         try:
             # 创建LLM
@@ -513,14 +489,7 @@ class GeoRAGService:
                 temperature=0.1,
                 verbose=True
             ))
-            # 启动 MCP 服务器会话并加载工具
-            # async with stdio_client(server_params) as (read, write):
-            #     async with ClientSession(read, write) as session:
-            #         await session.initialize()
-            #         # 加载 MCP 工具
-            #         tools = await load_mcp_tools(session)
-            #         logging.info("MCP tools initialized successfully.")
-
+            
             # 1.处理记忆
             if use_memory:
                 # 创建或获取会话
@@ -544,11 +513,11 @@ class GeoRAGService:
                 messages.append(HumanMessage(content=query))
                 
                 # 2. 加载 MCP 工具并创建 Agent
-                # tools = self.mcp_tools
-                agent = create_react_agent(llm, tools=self.mcp_tools)
+                tools = self.mcp_tools
+                agent = create_react_agent(llm, tools)
                 
                 # 3. 运行 Agent
-                result = await agent.ainvoke({
+                result = agent.invoke({
                     "messages": messages
                 })
                 ai_response = result["messages"][-1].content
@@ -556,11 +525,11 @@ class GeoRAGService:
                 # 4. 记忆入库
                 self._add_to_memory(session_id, query, ai_response)
                 
-                return JSONResponse(content={
+                return jsonify({
                     "response": ai_response,
                     "session_id": session_id,
                     "message_count": self.chat_sessions[session_id]["message_count"]
-                }, status_code=200)
+                }), 200
                 
             else:
                 # 不使用记忆，简单的一次性对话
@@ -570,10 +539,10 @@ class GeoRAGService:
                 ]
                 
                 response = llm.invoke(messages)
-                return JSONResponse(content={"response": response.content}, status_code=200)
+                return jsonify({"response": response.content}), 200
             
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            return jsonify({"error": str(e)}), 500
     
     def get_chat_history(self, request):
         """
@@ -586,10 +555,10 @@ class GeoRAGService:
         session_id = request.json.get("session_id")
         
         if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required")
+            return jsonify({"error": "session_id is required"}), 400
         
         if session_id not in self.chat_sessions:
-            raise HTTPException(status_code=404, detail="Session not found")
+            return jsonify({"error": "Session not found"}), 404
         
         try:
             history = self._get_conversation_history(session_id)
@@ -604,11 +573,12 @@ class GeoRAGService:
                 elif isinstance(msg, SystemMessage):
                     formatted_history.append({"role": "system", "content": msg.content})
             
-            return JSONResponse(content={
+            return jsonify({
                 "session_id": session_id,
                 "history": formatted_history,
                 "message_count": self.chat_sessions[session_id]["message_count"]
-            }, status_code=200)
+            }), 200
             
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            return jsonify({"error": str(e)}), 500
+
