@@ -237,90 +237,76 @@ class GeoRAGService:
             logging.error(f"加载聊天模型失败: {e}")
             return []  
 
-    def get_databases(self, request):
+    def get_databases(self):
         """
         获取所有知识库列表
         返回知识库列表
         """
-        try:
-            databases = get_all_databases()
-            return JSONResponse(content={"databases": databases}, status_code=200)
-        except Exception as e:
-            return JSONResponse(content={"error": str(e)}, status_code=500)
+        databases = get_all_databases()
+        return {"databases": databases}
 
-    def create_database(self, request):
+    def create_database(self, model_name, db_name, files=None):
         """
         创建向量数据库的接口
-        请求参数:
+        参数:
             model_name: 嵌入模型名称
             db_name: 数据库名称
             files: 要上传的文件列表 (可选)
-        返回成功或失败的消息
+        返回成功消息和相关信息
         """
-        
-        # 获取请求参数
-        model_name = request.form.get("model_name")
-        db_name = request.form.get("db_name")
         
         # 验证必要参数
         if not model_name:
-            raise HTTPException(status_code=400, detail="model_name is required")
+            raise ValueError("model_name is required")
         if not db_name:
-            raise HTTPException(status_code=400, detail="db_name is required")
+            raise ValueError("db_name is required")
         
         # 验证模型是否存在
         if model_name not in self.get_available_embedding_models():
-            raise HTTPException(status_code=400, detail=f"Embedding model '{model_name}' is not available")
-        
-        try:
-            # 处理上传的文件
-            file_paths = []
-            if 'files' in request.files:
-                files = request.files.getlist('files')
-                for file in files:
-                    if file and self.allowed_file(file.filename):
-                        # 安全地获取文件名并保存
-                        filename = secure_filename(file.filename)
-                        # 添加随机字符串避免文件名冲突
-                        unique_filename = f"{uuid.uuid4().hex}_{filename}"
-                        file_path = save_uploaded_file(file, unique_filename)
-                        file_paths.append(file_path)
-            
-            # 创建数据库
-            self.vector_dbs[db_name] = create_db(model_name, db_name, file_paths)
-            return JSONResponse(content={
-                "message": f"Database '{db_name}' created successfully",
-                "db_name": db_name,
-                "model_name": model_name,
-                "files_processed": len(file_paths)
-            }, status_code=200)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-    
-    def add_files_to_database(self, request):
-        """
-        向已有知识库添加新文件
-        请求参数:
-            db_name: 知识库名称
-            files: 要添加的文件列表
-        返回值:
-            成功或失败的消息
-        """
-        # 获取请求参数
-        db_name = request.form.get("db_name")
-        
-        # 验证必要参数
-        if not db_name:
-            raise HTTPException(status_code=400, detail="db_name is required")
-        
-        # 验证知识库是否存在
-        if db_name not in self.vector_dbs:
-            raise HTTPException(status_code=404, detail=f"Database '{db_name}' not found")
+            raise ValueError(f"Embedding model '{model_name}' is not available")
         
         # 处理上传的文件
         file_paths = []
-        if 'files' in request.files:
-            files = request.files.getlist('files')
+        if files:
+            for file in files:
+                if file and self.allowed_file(file.filename):
+                    # 安全地获取文件名并保存
+                    filename = secure_filename(file.filename)
+                    # 添加随机字符串避免文件名冲突
+                    unique_filename = f"{uuid.uuid4().hex}_{filename}"
+                    file_path = save_uploaded_file(file, unique_filename)
+                    file_paths.append(file_path)
+        
+        # 创建数据库
+        self.vector_dbs[db_name] = create_db(model_name, db_name, file_paths)
+        return {
+            "message": f"Database '{db_name}' created successfully",
+            "db_name": db_name,
+            "model_name": model_name,
+            "files_processed": len(file_paths)
+        }
+    
+    def add_files_to_database(self, db_name, files):
+        """
+        向已有知识库添加新文件
+        参数:
+            db_name: 知识库名称
+            files: 要添加的文件列表
+        返回值:
+            成功消息和相关信息
+        """
+        
+        # 验证必要参数
+        if not db_name:
+            raise ValueError("db_name is required")
+        
+        # 验证知识库是否存在
+        if db_name not in self.vector_dbs:
+            raise ValueError(f"Database '{db_name}' not found")
+        
+        # 处理上传的文件
+        file_paths = []
+        if files:
             for file in files:
                 if file and self.allowed_file(file.filename):
                     # 安全地获取文件名并保存
@@ -330,37 +316,31 @@ class GeoRAGService:
                     file_paths.append(file_path)
         
         # 更新知识库
-        try:
-            self.vector_dbs[db_name].add_files(file_paths)  # 假设 VectorDB 支持 add_files 方法
-            return JSONResponse(content={
-                "message": f"Files added to database '{db_name}' successfully",
-                "db_name": db_name,
-                "files_processed": len(file_paths)
-            }, status_code=200)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        self.vector_dbs[db_name].add_files(file_paths)  # 假设 VectorDB 支持 add_files 方法
+        return {
+            "message": f"Files added to database '{db_name}' successfully",
+            "db_name": db_name,
+            "files_processed": len(file_paths)
+        }
 
     def delete_db(self, db_name):
         """
         删除指定知识库
-        路径参数:
+        参数:
             db_name: 知识库名称
         返回值:
-            成功或失败的消息
+            成功消息
         """
-        try:
-            # 从内存中移除
-            if db_name in self.vector_dbs:
-                del self.vector_dbs[db_name]
-            
-            # 从磁盘中删除
-            success = delete_database(db_name)
-            if success:
-                return JSONResponse(content={"message": f"Database '{db_name}' deleted successfully"}, status_code=200)
-            else:
-                return JSONResponse(content={"error": f"Database '{db_name}' not found"}, status_code=404)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        # 从内存中移除
+        if db_name in self.vector_dbs:
+            del self.vector_dbs[db_name]
+        
+        # 从磁盘中删除
+        success = delete_database(db_name)
+        if not success:
+            raise ValueError(f"Database '{db_name}' not found")
+        
+        return {"message": f"Database '{db_name}' deleted successfully"}
 
     def get_documents(self):
         """
@@ -368,13 +348,10 @@ class GeoRAGService:
         返回值:
             文件列表
         """
-        try:
-            if not os.path.exists(self.upload_folder):
-                return JSONResponse(content={"documents": []}, status_code=200)
-            documents = [f for f in os.listdir(self.upload_folder) if os.path.isfile(os.path.join(self.upload_folder, f))]
-            return JSONResponse(content={"documents": documents}, status_code=200)
-        except Exception as e:
-            return JSONResponse(content={"error": str(e)}, status_code=500)
+        if not os.path.exists(self.upload_folder):
+            return {"documents": []}
+        documents = [f for f in os.listdir(self.upload_folder) if os.path.isfile(os.path.join(self.upload_folder, f))]
+        return {"documents": documents}
 
     def download_document(self, filename):
         """
@@ -393,222 +370,190 @@ class GeoRAGService:
     def delete_document(self, filename):
         """
         删除指定文件
-        路径参数:
+        参数:
             filename: 文件名
         返回值:
-            成功或失败的消息
+            成功消息
         """
-        try:
-            file_path = os.path.join(self.upload_folder, filename)
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                return JSONResponse(content={"message": f"Document '{filename}' deleted successfully"}, status_code=200)
-            else:
-                return JSONResponse(content={"error": f"Document '{filename}' not found"}, status_code=404)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        file_path = os.path.join(self.upload_folder, filename)
+        if not os.path.exists(file_path):
+            raise ValueError(f"Document '{filename}' not found")
+        
+        os.remove(file_path)
+        return {"message": f"Document '{filename}' deleted successfully"}
 
-    def ask_question(self, request):
+    def ask_question(self, query, db_name, chat_model_name=None):
         """
         运行RAG智能体的接口
-        请求参数:
+        参数:
             query: 用户查询
             db_name: 知识库名称
             chat_model_name: 聊天模型名称 (可选)
-            use_api: 是否使用API (可选，默认True)
         返回值:
             智能体的回答
         """
         
-        # 获取请求参数
-        query = request.json.get("query")
-        db_name = request.json.get("db_name")
         use_api = True  # 默认使用 API
         api_key = os.environ.get("OPENAI_API_KEY")  # 使用环境变量中的 API 密钥
         api_base = os.environ.get("OPENAI_API_BASE")  # 使用环境变量中的 API 基础 URL
         
         # 获取用户指定的模型名称
-        chat_model_name = request.json.get("chat_model_name", self.default_chat_model)
+        if not chat_model_name:
+            chat_model_name = self.default_chat_model
         
         # 验证必要参数
         if not query:
-            raise HTTPException(status_code=400, detail="query is required")
+            raise ValueError("query is required")
         if not db_name:
-            raise HTTPException(status_code=400, detail="db_name is required")
+            raise ValueError("db_name is required")
         
         # 验证模型是否存在
         if chat_model_name not in self.get_available_chat_models():
-            raise HTTPException(status_code=400, detail=f"Chat model '{chat_model_name}' is not available")
+            raise ValueError(f"Chat model '{chat_model_name}' is not available")
         
-        try:
-            # 获取向量数据库
-            vector_db = self.vector_dbs.get(db_name)
-            print("db", vector_db)
-            response = []
-            def stream_response(chunk):
-                if "agent" in chunk:
-                    agent_message = chunk["agent"]["messages"][0]
-                    if agent_message.content:
-                        response.append(agent_message.content)
-                elif "tools" in chunk:
-                    tool_message = chunk["tools"]["messages"][0]
-                    response.append(tool_message.content)  # 捕获工具消息内容
-            
-            ask_agent(
-                chat_model_name=chat_model_name,
-                query=query,
-                use_api=use_api,
-                api_key=api_key,
-                api_base=api_base,
-                vector_db=vector_db,
-                callback=stream_response  # 添加回调函数参数
-            )
-            return JSONResponse(content={"response": "\n".join(response)}, status_code=200)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        # 获取向量数据库
+        vector_db = self.vector_dbs.get(db_name)
+        print("db", vector_db)
+        response = []
+        def stream_response(chunk):
+            if "agent" in chunk:
+                agent_message = chunk["agent"]["messages"][0]
+                if agent_message.content:
+                    response.append(agent_message.content)
+            elif "tools" in chunk:
+                tool_message = chunk["tools"]["messages"][0]
+                response.append(tool_message.content)  # 捕获工具消息内容
+        
+        ask_agent(
+            chat_model_name=chat_model_name,
+            query=query,
+            use_api=use_api,
+            api_key=api_key,
+            api_base=api_base,
+            vector_db=vector_db,
+            callback=stream_response  # 添加回调函数参数
+        )
+        return {"response": "\n".join(response)}
 
-    async def chat_with_agent(self, request):
+    async def chat_with_agent(self, prompt, query, chat_model_name=None, session_id=None, use_memory=True):
         """
         纯对话智能体的接口 - 支持记忆功能
-        请求参数:
+        参数:
             prompt: 系统提示词
             query: 用户查询
             chat_model_name: 聊天模型名称 (可选)
-            use_api: 是否使用API (可选，默认True)
             session_id: 会话ID (可选，如果不提供则创建新会话)
             use_memory: 是否使用记忆功能 (可选，默认True)
         返回值:
             智能体的回答和会话ID
         """
-        # 获取请求参数
-        prompt = request.prompt
-        query = request.query
-        session_id = request.session_id
-        use_memory = request.use_memory
         use_api = True  # 默认使用 API
         api_key = os.environ.get("OPENAI_API_KEY")
         api_base = os.environ.get("OPENAI_API_BASE")
-        chat_model_name = request.chat_model_name if request.chat_model_name else self.default_chat_model
+        if not chat_model_name:
+            chat_model_name = self.default_chat_model
         
         # 验证必要参数
         if not prompt:
-            raise HTTPException(status_code=400, detail="prompt is required")
+            raise ValueError("prompt is required")
         if not query:
-            raise HTTPException(status_code=400, detail="query is required")
+            raise ValueError("query is required")
         
         # 验证模型是否存在
         if chat_model_name not in self.get_available_chat_models():
-            raise HTTPException(status_code=400, detail=f"Chat model '{chat_model_name}' is not available")
+            raise ValueError(f"Chat model '{chat_model_name}' is not available")
         
-        try:
-            # 创建LLM
-            llm = (ChatOpenAI(
-                model=chat_model_name,
-                temperature=0.1,
-                verbose=True,
-                api_key=api_key,
-                base_url=api_base
-            ) if use_api else ChatOllama(
-                model=chat_model_name,
-                temperature=0.1,
-                verbose=True
-            ))
-            # 启动 MCP 服务器会话并加载工具
-            # async with stdio_client(server_params) as (read, write):
-            #     async with ClientSession(read, write) as session:
-            #         await session.initialize()
-            #         # 加载 MCP 工具
-            #         tools = await load_mcp_tools(session)
-            #         logging.info("MCP tools initialized successfully.")
+        # 创建LLM
+        llm = (ChatOpenAI(
+            model=chat_model_name,
+            temperature=0.1,
+            verbose=True,
+            api_key=api_key,
+            base_url=api_base
+        ) if use_api else ChatOllama(
+            model=chat_model_name,
+            temperature=0.1,
+            verbose=True
+        ))
 
-            # 1.处理记忆
-            if use_memory:
-                # 创建或获取会话
-                session_id = self._create_session(session_id)
-                self._update_session_activity(session_id)
-                
-                # 获取历史对话
-                history = self._get_conversation_history(session_id)
-                
-                # 构建消息列表
-                messages = []
-                
-                # 添加系统提示词
-                messages.append(SystemMessage(content=prompt))
-                
-                # 添加历史对话
-                for msg in history:
-                    messages.append(msg)
-                
-                # 添加当前用户查询
-                messages.append(HumanMessage(content=query))
-                
-                # 2. 加载 MCP 工具并创建 Agent
-                # tools = self.mcp_tools
-                agent = create_react_agent(llm, tools=self.mcp_tools)
-                
-                # 3. 运行 Agent
-                result = await agent.ainvoke({
-                    "messages": messages
-                })
-                ai_response = result["messages"][-1].content
-                
-                # 4. 记忆入库
-                self._add_to_memory(session_id, query, ai_response)
-                
-                return JSONResponse(content={
-                    "response": ai_response,
-                    "session_id": session_id,
-                    "message_count": self.chat_sessions[session_id]["message_count"]
-                }, status_code=200)
-                
-            else:
-                # 不使用记忆，简单的一次性对话
-                messages = [
-                    SystemMessage(content=prompt),
-                    HumanMessage(content=query)
-                ]
-                
-                response = llm.invoke(messages)
-                return JSONResponse(content={"response": response.content}, status_code=200)
+        # 1.处理记忆
+        if use_memory:
+            # 创建或获取会话
+            session_id = self._create_session(session_id)
+            self._update_session_activity(session_id)
             
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            # 获取历史对话
+            history = self._get_conversation_history(session_id)
+            
+            # 构建消息列表
+            messages = []
+            
+            # 添加系统提示词
+            messages.append(SystemMessage(content=prompt))
+            
+            # 添加历史对话
+            for msg in history:
+                messages.append(msg)
+            
+            # 添加当前用户查询
+            messages.append(HumanMessage(content=query))
+            
+            # 2. 加载 MCP 工具并创建 Agent
+            agent = create_react_agent(llm, tools=self.mcp_tools)
+            
+            # 3. 运行 Agent
+            result = await agent.ainvoke({
+                "messages": messages
+            })
+            ai_response = result["messages"][-1].content
+            
+            # 4. 记忆入库
+            self._add_to_memory(session_id, query, ai_response)
+            
+            return {
+                "response": ai_response,
+                "session_id": session_id,
+                "message_count": self.chat_sessions[session_id]["message_count"]
+            }
+            
+        else:
+            # 不使用记忆，简单的一次性对话
+            messages = [
+                SystemMessage(content=prompt),
+                HumanMessage(content=query)
+            ]
+            
+            response = llm.invoke(messages)
+            return {"response": response.content}
     
-    def get_chat_history(self, request):
+    def get_chat_history(self, session_id):
         """
         获取会话历史记录
-        请求参数:
+        参数:
             session_id: 会话ID
         返回值:
             历史对话记录
         """
-        session_id = request.json.get("session_id")
-        
         if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required")
+            raise ValueError("session_id is required")
         
         if session_id not in self.chat_sessions:
-            raise HTTPException(status_code=404, detail="Session not found")
+            raise ValueError("Session not found")
         
-        try:
-            history = self._get_conversation_history(session_id)
-            
-            # 格式化历史记录
-            formatted_history = []
-            for msg in history:
-                if isinstance(msg, HumanMessage):
-                    formatted_history.append({"role": "user", "content": msg.content})
-                elif isinstance(msg, AIMessage):
-                    formatted_history.append({"role": "assistant", "content": msg.content})
-                elif isinstance(msg, SystemMessage):
-                    formatted_history.append({"role": "system", "content": msg.content})
-            
-            return JSONResponse(content={
-                "session_id": session_id,
-                "history": formatted_history,
-                "message_count": self.chat_sessions[session_id]["message_count"]
-            }, status_code=200)
-            
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        history = self._get_conversation_history(session_id)
+        
+        # 格式化历史记录
+        formatted_history = []
+        for msg in history:
+            if isinstance(msg, HumanMessage):
+                formatted_history.append({"role": "user", "content": msg.content})
+            elif isinstance(msg, AIMessage):
+                formatted_history.append({"role": "assistant", "content": msg.content})
+            elif isinstance(msg, SystemMessage):
+                formatted_history.append({"role": "system", "content": msg.content})
+        
+        return {
+            "session_id": session_id,
+            "history": formatted_history,
+            "message_count": self.chat_sessions[session_id]["message_count"]
+        }

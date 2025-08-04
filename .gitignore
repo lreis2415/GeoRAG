@@ -13,3 +13,6 @@
 # 忽略配置变量
 *.env
 .clinerules
+
+# 忽略对话缓存文件
+session_*.md
