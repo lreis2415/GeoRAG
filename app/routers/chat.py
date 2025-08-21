@@ -4,9 +4,9 @@
 """
 
 from fastapi import APIRouter, Depends
-from ..responses import success_response, error_response
-from ..models import ChatRequest, ChatHistoryRequest
-from ..dependencies import (
+from app.utils.response import success_response, error_response
+from app.utils.models import ChatRequest, ChatHistoryRequest
+from app.utils.dependencies import (
     get_chat_service,
     get_model_service,
     get_rag_service,
@@ -19,14 +19,6 @@ from ..services.rag_service import RAGService
 from ..services.mcp_service import MCPService
 
 router = APIRouter()
-"""
-聊天功能路由
-提供聊天对话相关的API接口
-"""
-
-from fastapi import APIRouter, Depends
-from ..responses import success_response, error_response
-from ..models import ChatRequest, ChatHistoryRequest
 
 @router.post("/chat")
 async def chat_with_agent(

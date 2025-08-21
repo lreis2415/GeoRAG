@@ -4,9 +4,9 @@
 """
 
 from fastapi import APIRouter, Depends
-from ..responses import success_response, error_response
-from ..dependencies import get_model_service
-from ..services import ModelService
+from app.utils.response import success_response, error_response
+from app.utils.dependencies import get_model_service
+from app.services import ModelService
 
 router = APIRouter()
 

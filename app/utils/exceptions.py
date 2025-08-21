@@ -8,7 +8,7 @@ from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from .responses import error_response
+from .response import error_response
 
 # 配置日志
 logger = logging.getLogger(__name__)

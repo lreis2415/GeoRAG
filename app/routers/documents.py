@@ -5,9 +5,9 @@
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
-from ..responses import success_response, error_response
-from ..dependencies import get_document_service
-from ..services.document_service import DocumentService
+from app.utils.response import success_response, error_response
+from app.utils.dependencies import get_document_service
+from app.services.document_service import DocumentService
 
 router = APIRouter()
 

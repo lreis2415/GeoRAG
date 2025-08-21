@@ -10,7 +10,7 @@ from langchain_ollama import ChatOllama
 from langchain.schema import HumanMessage, SystemMessage, AIMessage
 from langgraph.prebuilt import create_react_agent
 from .base_service import BaseService
-from GeoRAGService.RAGAgent import ask_agent
+from dao.DataBase import ask_agent
 
 class RAGService(BaseService):
     """RAG问答服务类"""

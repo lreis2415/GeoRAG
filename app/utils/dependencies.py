@@ -4,7 +4,7 @@
 """
 
 from functools import lru_cache
-from .services import (
+from app.services import (
     ModelService,
     DatabaseService,
     DocumentService,

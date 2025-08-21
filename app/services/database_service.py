@@ -7,7 +7,7 @@ import uuid
 from typing import Dict, List, Optional, Any
 from werkzeug.utils import secure_filename
 from .base_service import BaseService
-from GeoRAGService.RAGAgent import create_db, delete_database, get_all_databases, save_uploaded_file
+from app.dao.DataBase import create_db, delete_database, get_all_databases, save_uploaded_file
 
 class DatabaseService(BaseService):
     """数据库管理服务类"""

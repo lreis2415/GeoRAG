@@ -4,8 +4,8 @@
 """
 
 from fastapi import APIRouter
-from ..responses import success_response
-from ..config import config
+from app.utils.response import success_response
+from app.utils.config import config
 
 router = APIRouter()
 

@@ -4,12 +4,12 @@
 """
 
 from fastapi import APIRouter, Request, Depends
-from ..responses import success_response, error_response
-from ..models import AskRequest
-from ..dependencies import get_database_service, get_model_service, get_rag_service
-from ..services.database_service import DatabaseService
-from ..services.rag_service import RAGService
-from ..services.model_service import ModelService
+from app.utils.response import success_response, error_response
+from app.utils.models import AskRequest
+from app.utils.dependencies import get_database_service, get_model_service, get_rag_service
+from app.services.database_service import DatabaseService
+from app.services.rag_service import RAGService
+from app.services.model_service import ModelService
 
 router = APIRouter()
 

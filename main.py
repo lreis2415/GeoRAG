@@ -8,11 +8,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 
-from .config import config
-from .exceptions import register_exception_handlers
-from .dependencies import get_global_mcp_service, set_global_mcp_service
-from .services import MCPService
-from .routers import (
+from app.utils.config import config
+from app.utils.exceptions import register_exception_handlers
+from app.utils.dependencies import get_global_mcp_service, set_global_mcp_service
+from app.services import MCPService
+from app.routers import (
     health_router,
     models_router,
     databases_router,
