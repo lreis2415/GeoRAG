@@ -5,7 +5,15 @@
 
 from fastapi import APIRouter, Depends
 from app.utils.response import success_response, error_response
-from app.utils.models import ChatRequest, ChatHistoryRequest
+from app.utils.models import (
+    SessionsResponse,
+    StandardResponse,
+    ChatRequest, 
+    ChatHistoryRequest,
+    ChatResponse, 
+    ChatHistoryResponse, 
+    ChatInitResponse
+    )
 from app.utils.dependencies import (
     get_chat_service,
     get_model_service,
@@ -18,19 +26,9 @@ from ..services.model_service import ModelService
 from ..services.rag_service import RAGService
 from ..services.mcp_service import MCPService
 
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, List
-
-class ChatResponse(BaseModel):
-    """聊天接口返回体"""
-    response: str = Field(..., description="聊天响应内容", example="数字地形模型是...")
-    session_id: Optional[str] = Field(None, description="会话ID", example="550e8400-e29b-41d4-a716-446655440000")
-    message_count: Optional[int] = Field(None, description="消息数量", example=5)
-    
-
 router = APIRouter()
 
-@router.post("/chat")
+@router.post("/chat", response_model=StandardResponse[ChatResponse])
 async def chat_with_agent(
     request: ChatRequest,
     chat_service: ChatService = Depends(get_chat_service),
@@ -90,7 +88,7 @@ async def chat_with_agent(
     except Exception as e:
         return error_response(message=str(e), code=5010)
 
-@router.get("/chat/init")
+@router.get("/chat/init", response_model=StandardResponse[ChatInitResponse])
 async def init_chat_service(chat_service: ChatService = Depends(get_chat_service)):
     """
     初始化聊天服务并创建新会话
@@ -104,7 +102,7 @@ async def init_chat_service(chat_service: ChatService = Depends(get_chat_service
 
 
     
-@router.get("/chat/sessions")
+@router.get("/chat/sessions", response_model=StandardResponse[SessionsResponse])
 async def get_chat_sessions(chat_service: ChatService = Depends(get_chat_service)):
     """
     获取所有会话信息
@@ -115,7 +113,7 @@ async def get_chat_sessions(chat_service: ChatService = Depends(get_chat_service
     except Exception as e:
         return error_response(message="无法获取会话信息", code=5011)
 
-@router.delete("/chat/sessions/{session_id}")
+@router.delete("/chat/sessions/{session_id}", response_model=StandardResponse[None])
 async def delete_chat_session(
     session_id: str,
     chat_service: ChatService = Depends(get_chat_service)
@@ -131,7 +129,7 @@ async def delete_chat_session(
     except Exception as e:
         return error_response(message="无法删除会话", code=5012)
 
-@router.post("/chat/sessions/clear")
+@router.post("/chat/sessions/clear", response_model=StandardResponse[None])
 async def clear_all_sessions(chat_service: ChatService = Depends(get_chat_service)):
     """
     清空所有会话
@@ -142,7 +140,7 @@ async def clear_all_sessions(chat_service: ChatService = Depends(get_chat_servic
     except Exception as e:
         return error_response(message="无法清空会话", code=5013)
 
-@router.post("/chat/history")
+@router.post("/chat/history", response_model=StandardResponse[ChatHistoryResponse])
 async def get_chat_history(
     request: ChatHistoryRequest,
     chat_service: ChatService = Depends(get_chat_service)

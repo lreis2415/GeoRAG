@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Union, TypeVar, Generic
 # 定义通用响应数据类型
 T = TypeVar('T')
 
-class StandardResponse(Generic[T]):
+class StandardResponse(BaseModel, Generic[T]):
     """标准API响应格式"""
     success: bool  # 操作是否成功
     code: int  # 状态码，如2000表示成功
@@ -63,3 +63,21 @@ class ModelsResponse(BaseModel):
 class SessionsResponse(BaseModel):
     """会话列表响应模型"""
     sessions: List[str]
+
+class ChatResponse(BaseModel):
+    """聊天对话响应模型"""
+    response: str = Field(..., description="AI回复内容")
+    session_id: Optional[str] = Field(None, description="会话ID")
+    message_count: Optional[int] = Field(None, description="消息数量")
+    tool_calls: Optional[List[Dict[str, Any]]] = Field(None, description="工具调用信息")
+
+class ChatInitResponse(BaseModel):
+    """初始化聊天响应模型"""
+    session_id: str = Field(..., description="新创建的会话ID")
+
+class ChatHistoryResponse(BaseModel):
+    """聊天历史响应模型"""
+    session_id: str = Field(..., description="会话ID")
+    history: List[Dict[str, str]] = Field(..., description="对话历史记录")
+    created_at: str = Field(..., description="会话创建时间")
+    last_active: str = Field(..., description="最后活跃时间")
