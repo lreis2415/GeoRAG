@@ -139,7 +139,7 @@ class RAGService(BaseService):
             ))
 
             # 处理记忆
-            if use_memory and history:
+            if use_memory:
                 # 构建消息列表
                 messages = []
                 

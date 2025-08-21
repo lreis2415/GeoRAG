@@ -20,10 +20,11 @@ class ChatService(BaseService):
         self.chat_sessions = {}  # 存储会话记录 {session_id: {"memory": ConversationBufferMemory, "created_at": datetime, "last_active": datetime}}
         self.max_sessions = 100  # 最大会话数
         self.max_memory_length = 20  # 每个会话最大记忆轮次
+
     
     def create_session(self, session_id: str = None) -> str:
         """
-        创建或获取会话
+        创建会话
         
         Args:
             session_id: 会话ID，如果为None则创建新会话
@@ -31,6 +32,7 @@ class ChatService(BaseService):
         Returns:
             会话ID
         """
+            
         if session_id is None:
             session_id = str(uuid.uuid4())
         
