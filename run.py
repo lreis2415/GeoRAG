@@ -4,8 +4,7 @@ GeoRAG应用启动脚本
 """
 
 import uvicorn
-from main import app
-from app.config import config
+from app.utils.config import config
 
 if __name__ == "__main__":
     print(f"🚀 启动 {config.APP_NAME}")
@@ -14,7 +13,7 @@ if __name__ == "__main__":
     print(f"🔍 健康检查: http://{config.HOST}:{config.PORT}{config.API_PREFIX}/")
     
     uvicorn.run(
-        app,
+        "main:app",
         host=config.HOST,
         port=config.PORT,
         reload=True,  # 开发模式下自动重载

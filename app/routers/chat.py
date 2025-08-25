@@ -13,7 +13,7 @@ from app.utils.models import (
     ChatResponse, 
     ChatHistoryResponse, 
     ChatInitResponse
-    )
+)
 from app.utils.dependencies import (
     get_chat_service,
     get_model_service,
@@ -99,7 +99,6 @@ async def init_chat_service(chat_service: ChatService = Depends(get_chat_service
         return success_response(data={"session_id": session_id}, message="聊天服务已初始化")
     except Exception as e:
         return error_response(message="无法初始化聊天服务", code=5015)
-
 
     
 @router.get("/chat/sessions", response_model=StandardResponse[SessionsResponse])

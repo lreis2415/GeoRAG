@@ -15,13 +15,7 @@ class StandardResponse(BaseModel, Generic[T]):
     code: int  # 状态码，如2000表示成功
     message: str  # 描述信息
     data: Optional[T] = None  # 返回数据，可以是任何类型
-    
-    def __init__(self, success: bool, code: int, message: str, data: Optional[T] = None):
-        self.success = success
-        self.code = code
-        self.message = message
-        self.data = data
-    
+
     def dict(self):
         """转换为字典格式"""
         return {
