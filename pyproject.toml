@@ -1,0 +1,93 @@
+[tool.black]
+# Black 代码格式化工具配置
+line-length = 88                  # 设置每行最大字符数为 88
+target-version = ['py311']          # 目标 Python 版本为 3.11
+include = '\.pyi?$'               # 包含 .py 和 .pyi 文件
+extend-exclude = '''
+/(
+  # directories to exclude from formatting
+  \.eggs                          # 排除 eggs 目录
+  | \.git                         # 排除 git 目录
+  | \.hg                          # 排除 mercurial 目录
+  | \.mypy_cache                  # 排除 mypy 缓存目录
+  | \.tox                         # 排除 tox 目录
+  | \.venv                        # 排除虚拟环境目录
+  | build                         # 排除构建目录
+  | dist                          # 排除分发目录
+)/
+'''
+
+[tool.isort]
+# isort 导入排序工具配置
+profile = "black"                   # 使用 Black 兼容的配置文件
+multi_line_output = 3               # 多行导入的输出格式
+line_length = 88                    # 每行最大字符数，与 Black 保持一致
+known_first_party = ["app"]         # 项目内部模块
+known_third_party = ["fastapi", "uvicorn", "pydantic", "langchain"]  # 第三方库
+
+[tool.mypy]
+# mypy 类型检查工具配置
+python_version = "3.11"               # 目标 Python 版本
+warn_return_any = true               # 警告返回 Any 类型的函数
+warn_unused_configs = true           # 警告未使用的配置
+disallow_untyped_defs = true         # 禁止未类型化的函数定义
+disallow_incomplete_defs = true      # 禁止不完整的函数定义
+check_untyped_defs = true            # 检查函数定义中的类型
+disallow_untyped_decorators = true   # 禁止未类型化的装饰器
+no_implicit_optional = true          # 禁止隐式的 Optional 类型
+warn_redundant_casts = true          # 警告冗余的类型转换
+warn_unused_ignores = true          # 警告未使用的忽略注释
+warn_no_return = true                # 警告没有返回值的函数
+warn_unreachable = true              # 警告不可达的代码
+strict_equality = true              # 严格相等性检查
+
+[[tool.mypy.overrides]]
+# mypy 模块覆盖配置 - 为特定第三方库设置规则
+module = [
+    "langchain.*",                    # LangChain 核心库
+    "langchain_chroma.*",             # LangChain Chroma 集成
+    "langchain_community.*",          # LangChain 社区集成
+    "langchain_openai.*",             # LangChain OpenAI 集成
+    "langchain_ollama.*",             # LangChain Ollama 集成
+    "langgraph.*",                    # LangGraph 库
+    "chromadb.*",                     # ChromaDB 向量数据库
+    "ollama.*",                       # Ollama 本地模型服务
+    "deepseek.*",                     # DeepSeek 模型库
+]
+ignore_missing_imports = true        # 忽略这些库的缺失导入错误
+
+[tool.pylint.messages_control]
+# Pylint 消息控制配置
+disable = [
+    "C0111",  # missing-docstring      # 缺失文档字符串
+    "C0103",  # invalid-name           # 无效的命名（常用于简洁的变量名）
+    "C0114",  # missing-module-docstring  # 缺失模块文档字符串
+    "C0115",  # missing-class-docstring   # 缺失类文档字符串
+    "C0116",  # missing-function-docstring  # 缺失函数文档字符串
+    "R0903",  # too-few-public-methods     # 公共方法太少（适用于简单类）
+    "R0913",  # too-many-arguments         # 参数过多（适用于复杂函数）
+    "W0511",  # fixme                     # FIXME 注释（用于临时标记）
+    "R0801",  # duplicate-code            # 重复代码（用于相似的业务逻辑）
+]
+
+[tool.pylint.format]
+# Pylint 格式化配置
+max-line-length = 88                   # 最大行长度，与其他工具保持一致
+
+[tool.flake8]
+# flake8 代码风格检查工具配置
+max-line-length = 88                   # 最大行长度，与其他工具保持一致
+extend-ignore = ["E203", "W503"]       # 忽略特定规则：E203（冒号前空格）、W503（二元运算符换行）
+exclude = [
+    ".git",                           # Git 版本控制目录
+    "__pycache__",                    # Python 缓存目录
+    "build",                          # 构建目录
+    "dist",                           # 分发目录
+    ".venv",                          # 虚拟环境目录
+    ".mypy_cache",                    # MyPy 缓存目录
+]
+
+[tool.bandit]
+# bandit 安全检查工具配置
+exclude_dirs = ["tests", "docs"]      # 排除测试和文档目录
+skips = ["B101", "B601"]              # 跳过特定规则：B101（assert语句）、B601（shell注入）
