@@ -2,28 +2,28 @@
 repos:
   # Black 代码格式化工具
   - repo: https://github.com/psf/black
-    rev: stable                                # 使用 23.7.0 版本
+    rev: 25.9.0                                # 使用 23.7.0 版本
     hooks:
       - id: black                              # Black 代码格式化钩子
         language_version: python3.11           # 指定 Python 版本为 3.11
 
   # isort 导入排序工具
   - repo: https://github.com/pycqa/isort
-    rev: 5.12.0                                # 使用 5.12.0 版本
+    rev: 6.0.1                                # 使用 5.12.0 版本
     hooks:
       - id: isort                              # isort 导入排序钩子
         args: ["--profile", "black"]           # 使用 Black 兼容的配置文件
 
   # flake8 代码风格检查工具
   - repo: https://github.com/pycqa/flake8
-    rev: 6.0.0                                # 使用 6.0.0 版本
+    rev: 7.3.0                                # 使用 6.0.0 版本
     hooks:
       - id: flake8                            # flake8 代码风格检查钩子
         args: ["--max-line-length=88", "--extend-ignore=E203,W503"]  # 设置行长度和忽略规则
 
   # mypy 类型检查工具
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.11.1                             # 使用 v1.11.1 版本
+    rev: v1.18.2                             # 使用 v1.11.1 版本
     hooks:
       - id: mypy                              # mypy 类型检查钩子
         additional_dependencies: [types-requests]  # 额外的类型依赖
@@ -31,7 +31,7 @@ repos:
 
   # bandit 安全检查工具
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.7.5                                # 使用 1.7.5 版本
+    rev: 1.8.6                                # 使用 1.7.5 版本
     hooks:
       - id: bandit                            # bandit 安全检查钩子
         args: ["-r", "."]                     # 递归检查当前目录所有文件

@@ -5,14 +5,18 @@
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
-from app.utils.response import success_response, error_response
-from app.utils.dependencies import get_document_service
+
 from app.services.document_service import DocumentService
+from app.utils.dependencies import get_document_service
+from app.utils.response import error_response, success_response
 
 router = APIRouter()
 
+
 @router.get("/documents")
-async def list_documents(document_service: DocumentService = Depends(get_document_service)):
+async def list_documents(
+    document_service: DocumentService = Depends(get_document_service),
+):
     """
     获取所有文档列表
     """
@@ -22,10 +26,10 @@ async def list_documents(document_service: DocumentService = Depends(get_documen
     except Exception as e:
         return error_response(message="无法列出文档", code=5005)
 
+
 @router.get("/documents/download/{filename}")
 async def download_document(
-    filename: str,
-    document_service: DocumentService = Depends(get_document_service)
+    filename: str, document_service: DocumentService = Depends(get_document_service)
 ):
     """
     下载指定文档
@@ -39,10 +43,10 @@ async def download_document(
     except Exception as e:
         return error_response(message="无法下载文档", code=5006)
 
+
 @router.delete("/documents/delete/{filename}")
 async def delete_document(
-    filename: str,
-    document_service: DocumentService = Depends(get_document_service)
+    filename: str, document_service: DocumentService = Depends(get_document_service)
 ):
     """
     删除指定文档

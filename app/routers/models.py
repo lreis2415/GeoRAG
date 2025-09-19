@@ -4,11 +4,13 @@
 """
 
 from fastapi import APIRouter, Depends
-from app.utils.response import success_response, error_response
-from app.utils.dependencies import get_model_service
+
 from app.services import ModelService
+from app.utils.dependencies import get_model_service
+from app.utils.response import error_response, success_response
 
 router = APIRouter()
+
 
 @router.get("/models")
 async def get_models(model_service: ModelService = Depends(get_model_service)):
@@ -20,10 +22,7 @@ async def get_models(model_service: ModelService = Depends(get_model_service)):
         embedding_models = model_service.get_available_embedding_models()
         chat_models = model_service.get_available_chat_models()
         return success_response(
-            data={
-                "embedding_models": embedding_models,
-                "chat_models": chat_models
-            }
+            data={"embedding_models": embedding_models, "chat_models": chat_models}
         )
     except Exception as e:
         return error_response(message="获取模型列表失败", code=5001)

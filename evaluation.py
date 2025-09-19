@@ -1,10 +1,11 @@
-from datetime import datetime
+import json
 import logging
 import os
-from typing import Dict, List, Any, Optional
-import pandas as pd
-import json
 import time
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import pandas as pd
 
 from GeoRAGService.RAGAgent import ask_agent, get_persist_directory
 from GeoRAGService.VectorDB import VectorDB
@@ -12,7 +13,7 @@ from GeoRAGService.VectorDB import VectorDB
 
 class RAGEvaluator:
     """大模型RAG回答效果评估器"""
-    
+
     def __init__(
         self,
         chat_model_name: str,
@@ -22,11 +23,11 @@ class RAGEvaluator:
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
         use_tools: bool = True,  # 添加use_tools参数，默认为True
-        prompt: Optional[str] = None
+        prompt: Optional[str] = None,
     ):
         """
         初始化评估器
-        
+
         Args:
             chat_model_name: 聊天模型名称
             db_name: 数据库名称
@@ -45,126 +46,119 @@ class RAGEvaluator:
         self.api_base = api_base
         self.use_tools = use_tools  # 保存use_tools参数
         self.prompt = prompt
-        
+
         # 设置日志
         self.logger = self._setup_logger()
-        
+
         # 加载数据库
         self.vector_db = self._load_existing_database()
-        
+
         # 初始化评估结果
-        self.evaluation_results = {
-            "total": 0,
-            "success": 0,
-            "failure": 0,
-            "items": []
-        }
-        
-        self.logger.info(f"初始化评估器: 模型={chat_model_name}, 数据库={db_name}, 使用API={use_api}, 使用工具={use_tools}")
-        
+        self.evaluation_results = {"total": 0, "success": 0, "failure": 0, "items": []}
+
+        self.logger.info(
+            f"初始化评估器: 模型={chat_model_name}, 数据库={db_name}, 使用API={use_api}, 使用工具={use_tools}"
+        )
+
         # 记录会话元数据
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.session_log_file = os.path.join(log_dir, f"session_{self.session_id}.json")
         self.results = []
-    
+
     def _setup_logger(self) -> logging.Logger:
         """设置日志记录器"""
         # 创建日志目录
         os.makedirs(self.log_dir, exist_ok=True)
-        
+
         logger = logging.getLogger("rag_evaluator")
         logger.setLevel(logging.INFO)
-        
+
         # 文件处理器
-        file_handler = logging.FileHandler(
-            os.path.join(self.log_dir, "evaluator.log")
-        )
+        file_handler = logging.FileHandler(os.path.join(self.log_dir, "evaluator.log"))
         file_handler.setLevel(logging.INFO)
-        
+
         # 控制台处理器
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
-        
+
         # 格式化器
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
         file_handler.setFormatter(formatter)
         console_handler.setFormatter(formatter)
-        
+
         # 添加处理器
         logger.addHandler(file_handler)
         logger.addHandler(console_handler)
-        
+
         return logger
-    
+
     def _load_existing_database(self) -> VectorDB:
         """
         加载已有的知识库
-        
+
         Returns:
             VectorDB: 向量数据库实例
         """
         self.logger.info(f"正在加载已有知识库: {self.db_name}")
-        
+
         # 检查知识库是否存在
         db_path = get_persist_directory(self.db_name)
         if not os.path.exists(db_path):
             error_msg = f"知识库 {self.db_name} 不存在，请先创建知识库"
             self.logger.error(error_msg)
             raise FileNotFoundError(error_msg)
-        
+
         try:
             # 加载已有的向量数据库
             from GeoRAGService.FlexibleVectorDB import FlexibleVectorDB
+
             embedding_api_url = os.environ.get("EMBEDDING_API_URL", "")
-            
+
             vector_db = FlexibleVectorDB(
                 embedding_api_url=embedding_api_url,
                 persist_directory=db_path,
-                model_name="text-embedding-v3"
+                model_name="text-embedding-v3",
             )
-            
+
             self.logger.info(f"知识库 {self.db_name} 加载成功")
             return vector_db
         except Exception as e:
             error_msg = f"知识库加载失败: {str(e)}"
             self.logger.error(error_msg)
             raise RuntimeError(error_msg) from e
-    
+
     def load_dataset(self, dataset_path: str) -> List[Dict[str, Any]]:
         """
         加载评估数据集
-        
+
         Args:
             dataset_path: 数据集文件路径
-            
+
         Returns:
             数据集列表
         """
         self.logger.info(f"加载评估数据集: {dataset_path}")
-        
-        if dataset_path.endswith('.csv'):
+
+        if dataset_path.endswith(".csv"):
             df = pd.read_csv(dataset_path)
-            dataset = df.to_dict('records')
-        elif dataset_path.endswith('.json'):
-            with open(dataset_path, 'r', encoding='utf-8') as f:
+            dataset = df.to_dict("records")
+        elif dataset_path.endswith(".json"):
+            with open(dataset_path, "r", encoding="utf-8") as f:
                 dataset = json.load(f)
         else:
             raise ValueError(f"不支持的数据集格式: {dataset_path}")
-            
+
         self.logger.info(f"数据集加载成功，共 {len(dataset)} 条记录")
         return dataset
-    
+
     def _record_interaction(
-        self, 
-        query: str, 
-        response: str, 
-        metadata: Dict[str, Any]
+        self, query: str, response: str, metadata: Dict[str, Any]
     ) -> None:
         """
         记录交互数据
-        
+
         Args:
             query: 查询
             response: 响应
@@ -174,41 +168,41 @@ class RAGEvaluator:
             "timestamp": datetime.now().isoformat(),
             "query": query,
             "response": response,
-            "metadata": metadata
+            "metadata": metadata,
         }
-        
+
         self.results.append(interaction)
-        
+
         # 实时保存结果
-        with open(self.session_log_file, 'w', encoding='utf-8') as f:
+        with open(self.session_log_file, "w", encoding="utf-8") as f:
             json.dump(self.results, f, ensure_ascii=False, indent=2)
-    
+
     def run_evaluation(self, dataset: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         运行评估
-        
+
         Args:
             dataset: 评估数据集
-            
+
         Returns:
             评估结果
         """
         if not self.vector_db:
             raise ValueError("请先加载知识库")
-        
+
         total_count = len(dataset)
         self.logger.info(f"开始评估，共 {total_count} 条记录")
-        
+
         for i, item in enumerate(dataset):
             query = item.get("query")
             if not query:
                 self.logger.warning(f"记录 {i} 缺少查询字段，跳过")
                 continue
-                
+
             ground_truth = item.get("ground_truth", "")
-            
+
             self.logger.info(f"处理记录 {i+1}/{total_count}: {query[:50]}...")
-            
+
             # 记录响应和元数据
             response = ""
             metadata = {
@@ -216,7 +210,7 @@ class RAGEvaluator:
                 "start_time": time.time(),
                 "tokens": 0,  # 占位，实际应从API响应中获取
                 "model": self.chat_model_name,
-                "ground_truth": ground_truth
+                "ground_truth": ground_truth,
             }
 
             try:
@@ -226,57 +220,56 @@ class RAGEvaluator:
                     if "agent" in chunk:
                         agent_message = chunk["agent"]["messages"][0]
                         if agent_message.content:
-                            response += f"<模型输出> {agent_message.content}<模型输出>\n"
+                            response += (
+                                f"<模型输出> {agent_message.content}<模型输出>\n"
+                            )
                     elif "tools" in chunk:
                         tool_message = chunk["tools"]["messages"][0]
                         response += f"<检索结果> {tool_message.content}<检索结果>\n"
-                
-                
+
                 # 执行查询
                 ask_agent(
                     chat_model_name=self.chat_model_name,
                     query=query,
                     use_api=self.use_api,
-                    api_key=self.api_key, 
+                    api_key=self.api_key,
                     api_base=self.api_base,
                     vector_db=self.vector_db,
                     callback=capture_response,
                     prompt=self.prompt,
-                    use_tools=self.use_tools  # 传递use_tools参数
+                    use_tools=self.use_tools,  # 传递use_tools参数
                 )
-                
+
                 # 更新元数据
                 metadata["end_time"] = time.time()
                 metadata["duration"] = metadata["end_time"] - metadata["start_time"]
-                
+
                 # 记录交互
                 self._record_interaction(query, response, metadata)
-                
+
                 # 计算评估指标（留空）
                 self._evaluate_response(query, response, ground_truth, metadata)
-                
-                self.logger.info(f"记录 {i+1} 处理完成，耗时 {metadata['duration']:.2f}秒")
-                
+
+                self.logger.info(
+                    f"记录 {i+1} 处理完成，耗时 {metadata['duration']:.2f}秒"
+                )
+
             except Exception as e:
                 self.logger.error(f"处理记录 {i+1} 失败: {str(e)}")
                 metadata["error"] = str(e)
                 metadata["end_time"] = time.time()
                 metadata["duration"] = metadata["end_time"] - metadata["start_time"]
                 self._record_interaction(query, f"错误: {str(e)}", metadata)
-        
+
         self.logger.info("评估完成")
         return self._generate_evaluation_report()
-    
+
     def _evaluate_response(
-        self, 
-        query: str, 
-        response: str, 
-        ground_truth: str, 
-        metadata: Dict[str, Any]
+        self, query: str, response: str, ground_truth: str, metadata: Dict[str, Any]
     ) -> None:
         """
         评估响应（留空）
-        
+
         Args:
             query: 查询
             response: 响应
@@ -286,11 +279,11 @@ class RAGEvaluator:
         # 这里可以添加评估逻辑，例如计算相似度、ROUGE分数等
         # 暂时留空
         pass
-    
+
     def _generate_evaluation_report(self) -> Dict[str, Any]:
         """
         生成评估报告
-        
+
         Returns:
             评估报告
         """
@@ -298,9 +291,13 @@ class RAGEvaluator:
         # 暂时返回基本统计信息
         return {
             "total_queries": len(self.results),
-            "avg_duration": sum(r["metadata"]["duration"] for r in self.results) / len(self.results) if self.results else 0,
+            "avg_duration": (
+                sum(r["metadata"]["duration"] for r in self.results) / len(self.results)
+                if self.results
+                else 0
+            ),
             "session_id": self.session_id,
-            "log_file": self.session_log_file
+            "log_file": self.session_log_file,
         }
 
 
@@ -323,15 +320,15 @@ if __name__ == "__main__":
         use_tools=True,
         api_key=os.environ.get("OPENAI_API_KEY"),
         api_base=os.environ.get("OPENAI_API_BASE"),
-        prompt=dta_tools_prompt
+        prompt=dta_tools_prompt,
     )
-    
+
     # 加载数据集
     dataset = evaluator.load_dataset("GeoRAGService/data/evaluation/dta_questions.json")
-    
+
     # 运行评估
     results = evaluator.run_evaluation(dataset)
-    
+
     # 输出结果
     print("\n评估报告:")
     print(f"总查询数: {results['total_queries']}")

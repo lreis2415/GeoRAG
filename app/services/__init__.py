@@ -3,18 +3,18 @@
 提供各种业务逻辑服务
 """
 
-from .model_service import ModelService
+from .chat_service import ChatService
 from .database_service import DatabaseService
 from .document_service import DocumentService
-from .chat_service import ChatService
-from .rag_service import RAGService
 from .mcp_service import MCPService
+from .model_service import ModelService
+from .rag_service import RAGService
 
 __all__ = [
     "ModelService",
-    "DatabaseService", 
+    "DatabaseService",
     "DocumentService",
     "ChatService",
     "RAGService",
-    "MCPService"
+    "MCPService",
 ]

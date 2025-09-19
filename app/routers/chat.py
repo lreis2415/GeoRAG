@@ -4,29 +4,32 @@
 """
 
 from fastapi import APIRouter, Depends
-from app.utils.response import success_response, error_response
-from app.utils.models import (
-    SessionsResponse,
-    StandardResponse,
-    ChatRequest, 
-    ChatHistoryRequest,
-    ChatResponse, 
-    ChatHistoryResponse, 
-    ChatInitResponse
-)
+
 from app.utils.dependencies import (
     get_chat_service,
+    get_global_mcp_service,
+    get_mcp_service,
     get_model_service,
     get_rag_service,
-    get_global_mcp_service,
-    get_mcp_service
 )
+from app.utils.models import (
+    ChatHistoryRequest,
+    ChatHistoryResponse,
+    ChatInitResponse,
+    ChatRequest,
+    ChatResponse,
+    SessionsResponse,
+    StandardResponse,
+)
+from app.utils.response import error_response, success_response
+
 from ..services.chat_service import ChatService
+from ..services.mcp_service import MCPService
 from ..services.model_service import ModelService
 from ..services.rag_service import RAGService
-from ..services.mcp_service import MCPService
 
 router = APIRouter()
+
 
 @router.post("/chat", response_model=StandardResponse[ChatResponse])
 async def chat_with_agent(
@@ -34,39 +37,45 @@ async def chat_with_agent(
     chat_service: ChatService = Depends(get_chat_service),
     model_service: ModelService = Depends(get_model_service),
     rag_service: RAGService = Depends(get_rag_service),
-    mcp_service: MCPService = Depends(get_mcp_service)
+    mcp_service: MCPService = Depends(get_mcp_service),
 ):
     """
     聊天对话（支持记忆功能）
     """
     try:
         # 验证聊天模型是否存在
-        chat_model_name = request.chat_model_name or model_service.get_default_chat_model()
+        chat_model_name = (
+            request.chat_model_name or model_service.get_default_chat_model()
+        )
         if not model_service.validate_chat_model(chat_model_name):
-            return error_response(message=f"聊天模型 '{chat_model_name}' 不可用", code=4000)
-        
+            return error_response(
+                message=f"聊天模型 '{chat_model_name}' 不可用", code=4000
+            )
+
         # 处理会话和记忆
         session_id = None
         history = None
-        
+
         if request.use_memory:
             # 检查是否提供了session_id
             if not request.session_id:
-                return error_response(message="使用记忆功能时必须提供session_id", code=4000)
-            
+                return error_response(
+                    message="使用记忆功能时必须提供session_id", code=4000
+                )
+
             # 验证会话是否存在
             if not chat_service.session_exists(request.session_id):
                 return error_response(message="会话不存在，请先创建会话", code=4004)
-            
+
             # 获取历史对话
             session_id = request.session_id
             chat_service.update_session_activity(session_id)
             history = chat_service.get_conversation_history(session_id)
-        
+
         # 获取MCP工具
         mcp_service_instance = get_global_mcp_service()
         mcp_tools = mcp_service_instance.get_mcp_tools() or []
-        print("sessionId",session_id, history)
+        print("sessionId", session_id, history)
         # 调用RAG服务进行对话
         result = await rag_service.chat_with_agent(
             prompt=request.prompt,
@@ -75,18 +84,21 @@ async def chat_with_agent(
             chat_model_name=chat_model_name,
             session_id=session_id,
             use_memory=request.use_memory,
-            history=history
+            history=history,
         )
         # 如果使用记忆功能，保存对话记录
         if request.use_memory and session_id:
             chat_service.add_to_memory(session_id, request.query, result["response"])
-            result["message_count"] = len(chat_service.get_conversation_history(session_id)) // 2
-        
+            result["message_count"] = (
+                len(chat_service.get_conversation_history(session_id)) // 2
+            )
+
         return success_response(data=result)
     except ValueError as e:
         return error_response(message=str(e), code=4000)
     except Exception as e:
         return error_response(message=str(e), code=5010)
+
 
 @router.get("/chat/init", response_model=StandardResponse[ChatInitResponse])
 async def init_chat_service(chat_service: ChatService = Depends(get_chat_service)):
@@ -96,11 +108,13 @@ async def init_chat_service(chat_service: ChatService = Depends(get_chat_service
     try:
         # 创建新会话
         session_id = chat_service.create_session()
-        return success_response(data={"session_id": session_id}, message="聊天服务已初始化")
+        return success_response(
+            data={"session_id": session_id}, message="聊天服务已初始化"
+        )
     except Exception as e:
         return error_response(message="无法初始化聊天服务", code=5015)
 
-    
+
 @router.get("/chat/sessions", response_model=StandardResponse[SessionsResponse])
 async def get_chat_sessions(chat_service: ChatService = Depends(get_chat_service)):
     """
@@ -112,10 +126,10 @@ async def get_chat_sessions(chat_service: ChatService = Depends(get_chat_service
     except Exception as e:
         return error_response(message="无法获取会话信息", code=5011)
 
+
 @router.delete("/chat/sessions/{session_id}", response_model=StandardResponse[None])
 async def delete_chat_session(
-    session_id: str,
-    chat_service: ChatService = Depends(get_chat_service)
+    session_id: str, chat_service: ChatService = Depends(get_chat_service)
 ):
     """
     删除指定会话
@@ -128,6 +142,7 @@ async def delete_chat_session(
     except Exception as e:
         return error_response(message="无法删除会话", code=5012)
 
+
 @router.post("/chat/sessions/clear", response_model=StandardResponse[None])
 async def clear_all_sessions(chat_service: ChatService = Depends(get_chat_service)):
     """
@@ -139,10 +154,10 @@ async def clear_all_sessions(chat_service: ChatService = Depends(get_chat_servic
     except Exception as e:
         return error_response(message="无法清空会话", code=5013)
 
+
 @router.post("/chat/history", response_model=StandardResponse[ChatHistoryResponse])
 async def get_chat_history(
-    request: ChatHistoryRequest,
-    chat_service: ChatService = Depends(get_chat_service)
+    request: ChatHistoryRequest, chat_service: ChatService = Depends(get_chat_service)
 ):
     """
     获取会话历史记录

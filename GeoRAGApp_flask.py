@@ -1,9 +1,11 @@
-from flask import Flask, abort, request, send_file, jsonify
-from waitress import serve
-from dotenv import load_dotenv
-from GeoRAGService.georag_service_flask import GeoRAGService
-from flasgger import Swagger
 import os
+
+from dotenv import load_dotenv
+from flasgger import Swagger
+from flask import Flask, jsonify, request, send_file
+from waitress import serve
+
+from GeoRAGService.georag_service_flask import GeoRAGService
 
 load_dotenv()
 app = Flask(__name__)
@@ -14,15 +16,15 @@ swagger_config = {
     "headers": [],
     "specs": [
         {
-            "endpoint": 'apispec',
-            "route": '/apispec.json',
+            "endpoint": "apispec",
+            "route": "/apispec.json",
             "rule_filter": lambda rule: True,
             "model_filter": lambda tag: True,
         }
     ],
     "static_url_path": "/flasgger_static",
     "swagger_ui": True,
-    "specs_route": "/docs/"
+    "specs_route": "/docs/",
 }
 
 swagger_template = {
@@ -39,7 +41,7 @@ swagger_template = {
         "license": {
             "name": "MIT",
             "url": "https://opensource.org/licenses/MIT",
-        }
+        },
     },
     "host": "localhost:7512",
     "basePath": "/",
@@ -47,31 +49,13 @@ swagger_template = {
     "consumes": ["application/json", "multipart/form-data"],
     "produces": ["application/json"],
     "tags": [
-        {
-            "name": "健康检查",
-            "description": "系统健康状态检查"
-        },
-        {
-            "name": "模型管理",
-            "description": "模型信息查询相关接口"
-        },
-        {
-            "name": "数据库管理",
-            "description": "向量数据库管理相关接口"
-        },
-        {
-            "name": "文档管理",
-            "description": "文档上传、下载、删除等管理接口"
-        },
-        {
-            "name": "智能问答",
-            "description": "RAG智能问答相关接口"
-        },
-        {
-            "name": "会话管理",
-            "description": "聊天会话管理相关接口"
-        }
-    ]
+        {"name": "健康检查", "description": "系统健康状态检查"},
+        {"name": "模型管理", "description": "模型信息查询相关接口"},
+        {"name": "数据库管理", "description": "向量数据库管理相关接口"},
+        {"name": "文档管理", "description": "文档上传、下载、删除等管理接口"},
+        {"name": "智能问答", "description": "RAG智能问答相关接口"},
+        {"name": "会话管理", "description": "聊天会话管理相关接口"},
+    ],
 }
 
 swagger = Swagger(app, config=swagger_config, template=swagger_template)
@@ -82,7 +66,8 @@ EMBEDDING_API_URL = os.getenv("EMBEDDING_API_URL")
 # 初始化服务
 georag_service = GeoRAGService()
 
-@app.route('/')
+
+@app.route("/")
 def start():
     """
     健康检查接口
@@ -107,13 +92,15 @@ def start():
               type: string
               example: "1.0.0"
     """
-    return jsonify({
-        "status": "running",
-        "message": "GeoRAG服务正常运行",
-        "version": "1.0.0"
-    }), 200
+    return (
+        jsonify(
+            {"status": "running", "message": "GeoRAG服务正常运行", "version": "1.0.0"}
+        ),
+        200,
+    )
 
-@app.route('/models', methods=['GET'])
+
+@app.route("/models", methods=["GET"])
 def get_models():
     """
     获取可用模型列表
@@ -156,14 +143,15 @@ def get_models():
     try:
         embedding_models = georag_service.get_available_embedding_models()
         chat_models = georag_service.get_available_chat_models()
-        return jsonify({
-            "embedding_models": embedding_models,
-            "chat_models": chat_models
-        }), 200
+        return (
+            jsonify({"embedding_models": embedding_models, "chat_models": chat_models}),
+            200,
+        )
     except Exception as e:
         return jsonify({"error": "获取模型列表失败"}), 500
 
-@app.route('/databases', methods=['GET'])
+
+@app.route("/databases", methods=["GET"])
 def get_databases():
     """
     获取所有数据库列表
@@ -211,7 +199,8 @@ def get_databases():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/databases/add', methods=['POST'])
+
+@app.route("/databases/add", methods=["POST"])
 def add_database():
     """
     向数据库添加文件
@@ -280,7 +269,8 @@ def add_database():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/databases/<db_name>', methods=['DELETE'])
+
+@app.route("/databases/<db_name>", methods=["DELETE"])
 def delete_db(db_name):
     """
     删除指定数据库
@@ -328,7 +318,8 @@ def delete_db(db_name):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/documents', methods=['GET'])
+
+@app.route("/documents", methods=["GET"])
 def list_documents():
     """
     获取所有文档列表
@@ -367,7 +358,8 @@ def list_documents():
     except Exception as e:
         return jsonify({"error": "无法列出文档"}), 500
 
-@app.route('/documents/download/<filename>', methods=['GET'])
+
+@app.route("/documents/download/<filename>", methods=["GET"])
 def download_document(filename):
     """
     下载指定文档
@@ -413,7 +405,8 @@ def download_document(filename):
     except Exception as e:
         return jsonify({"error": "无法下载文档"}), 500
 
-@app.route('/documents/delete/<filename>', methods=['DELETE'])
+
+@app.route("/documents/delete/<filename>", methods=["DELETE"])
 def delete_document(filename):
     """
     删除指定文档
@@ -461,7 +454,8 @@ def delete_document(filename):
     except Exception as e:
         return jsonify({"error": "无法删除文档"}), 500
 
-@app.route('/create_db', methods=['POST'])
+
+@app.route("/create_db", methods=["POST"])
 def create_database():
     """
     创建新的向量数据库
@@ -531,7 +525,8 @@ def create_database():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/ask', methods=['POST'])
+
+@app.route("/ask", methods=["POST"])
 def ask_question():
     """
     RAG智能问答
@@ -597,7 +592,8 @@ def ask_question():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/chat', methods=['POST'])
+
+@app.route("/chat", methods=["POST"])
 def chat_with_agent():
     """
     聊天对话（支持记忆功能）
@@ -679,7 +675,8 @@ def chat_with_agent():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/chat/sessions', methods=['GET'])
+
+@app.route("/chat/sessions", methods=["GET"])
 def get_chat_sessions():
     """
     获取所有会话信息
@@ -731,7 +728,8 @@ def get_chat_sessions():
     except Exception as e:
         return jsonify({"error": "无法获取会话信息"}), 500
 
-@app.route('/chat/sessions/<session_id>', methods=['DELETE'])
+
+@app.route("/chat/sessions/<session_id>", methods=["DELETE"])
 def delete_chat_session(session_id):
     """
     删除指定会话
@@ -781,7 +779,8 @@ def delete_chat_session(session_id):
     except Exception as e:
         return jsonify({"error": "无法删除会话"}), 500
 
-@app.route('/chat/sessions/clear', methods=['POST'])
+
+@app.route("/chat/sessions/clear", methods=["POST"])
 def clear_all_sessions():
     """
     清空所有会话
@@ -814,7 +813,8 @@ def clear_all_sessions():
     except Exception as e:
         return jsonify({"error": "无法清空会话"}), 500
 
-@app.route('/chat/history', methods=['POST'])
+
+@app.route("/chat/history", methods=["POST"])
 def get_chat_history():
     """
     获取会话历史记录
@@ -902,7 +902,8 @@ def get_chat_history():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     # 使用waitress运行Flask应用，挂载到0.0.0.0:7513
-    serve(app, host='0.0.0.0', port=7513)
-    #app.run()
+    serve(app, host="0.0.0.0", port=7513)
+    # app.run()
