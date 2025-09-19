@@ -85,7 +85,9 @@ class ModelsResponse(BaseModel):
 class SessionsResponse(BaseModel):
     """会话列表响应模型"""
 
-    sessions: List[str]
+    sessions: Dict[str, Dict[str, Union[str, int]]] = Field(
+        ..., description="会话列表，键为会话ID，值为会话信息"
+    )
 
 
 class ChatResponse(BaseModel):

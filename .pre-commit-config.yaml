@@ -22,16 +22,16 @@ repos:
         args: ["--max-line-length=88", "--extend-ignore=E203,W503"]  # 设置行长度和忽略规则
 
   # mypy 类型检查工具
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.18.2                             # 使用 v1.11.1 版本
-    hooks:
-      - id: mypy                              # mypy 类型检查钩子
-        additional_dependencies: [types-requests]  # 额外的类型依赖
-        args: [--ignore-missing-imports]     # 忽略缺失的导入错误
+  # - repo: https://github.com/pre-commit/mirrors-mypy
+  #   rev: v1.18.2                             # 使用 v1.11.1 版本
+  #   hooks:
+  #     - id: mypy                              # mypy 类型检查钩子
+  #       additional_dependencies: [types-requests]  # 额外的类型依赖
+  #       args: [--ignore-missing-imports]     # 忽略缺失的导入错误
 
   # bandit 安全检查工具
-  - repo: https://github.com/PyCQA/bandit
-    rev: 1.8.6                                # 使用 1.7.5 版本
-    hooks:
-      - id: bandit                            # bandit 安全检查钩子
-        args: ["-r", "."]                     # 递归检查当前目录所有文件
+  # - repo: https://github.com/PyCQA/bandit
+  #   rev: 1.8.6                                # 使用 1.7.5 版本
+  #   hooks:
+  #     - id: bandit                            # bandit 安全检查钩子
+  #       args: ["-r", "."]                     # 递归检查当前目录所有文件

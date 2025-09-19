@@ -5,7 +5,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
@@ -20,9 +20,9 @@ class ChatService(BaseService):
     def __init__(self):
         super().__init__()
         # 添加会话管理
-        self.chat_sessions = (
-            {}
-        )  # 存储会话记录 {session_id: {"memory": ConversationBufferMemory, "created_at": datetime, "last_active": datetime}}
+        self.chat_sessions = {}
+        #  {session_id: {"memory": ConversationBufferMemory,
+        #  "created_at": datetime, "last_active": datetime}}
         self.max_sessions = 100  # 最大会话数
         self.max_memory_length = 20  # 每个会话最大记忆轮次
 
@@ -203,10 +203,23 @@ class ChatService(BaseService):
 
         self.log_info(f"获取会话 {session_id} 历史记录，共 {len(formatted_history)} 条")
 
+        # 安全地获取消息计数和时间戳
+        message_count = 0
+        created_at = datetime.now().isoformat()
+        last_active = datetime.now().isoformat()
+
+        if session_id in self.chat_sessions:
+            session = self.chat_sessions[session_id]
+            message_count = session.get("message_count", 0)
+            created_at = session["created_at"].isoformat()
+            last_active = session["last_active"].isoformat()
+
         return {
             "session_id": session_id,
             "history": formatted_history,
-            "message_count": self.chat_sessions[session_id]["message_count"],
+            "message_count": message_count,
+            "created_at": created_at,
+            "last_active": last_active,
         }
 
     def session_exists(self, session_id: str) -> bool:
