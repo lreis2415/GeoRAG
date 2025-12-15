@@ -5,6 +5,8 @@
 
 from functools import lru_cache
 
+from sqlalchemy.orm import Session
+
 from app.services import (
     ChatService,
     DatabaseService,
@@ -13,6 +15,7 @@ from app.services import (
     ModelService,
     RAGService,
 )
+from app.services.db import SessionLocal
 
 
 # 使用lru_cache确保单例模式
@@ -68,3 +71,13 @@ def set_global_mcp_service(service: MCPService):
     """设置全局MCP服务实例"""
     global _global_mcp_service
     _global_mcp_service = service
+
+
+# 新增：数据库 Session 依赖
+def get_db() -> Session:
+    """获取数据库会话"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
