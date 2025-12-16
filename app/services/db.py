@@ -1,8 +1,8 @@
-# app/db.py
+# app/services/db.py
 import os
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import sessionmaker
 
 DB_URL = os.getenv("DB_URL")
 if not DB_URL:
@@ -17,6 +17,3 @@ SessionLocal = sessionmaker(
     autoflush=False,
     bind=engine,
 )
-
-# Base 供 ORM 模型继承（后面如果要加 ORM）
-Base = declarative_base()

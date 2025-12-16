@@ -1,6 +1,6 @@
 from sqlalchemy import Column, DateTime, String, Text, func
 
-from app.services.db import Base
+from app.db.base import Base
 
 
 class ChatSession(Base):
