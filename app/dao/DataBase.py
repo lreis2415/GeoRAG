@@ -124,6 +124,10 @@ def create_db(
         except Exception as e:
             raise ValueError(f"嵌入文件失败: {str(e)}")
 
+    # 确保数据库目录存在：即使没有文件，列表接口也能看到该数据库
+    if not os.path.exists(persist_directory):
+        os.makedirs(persist_directory, exist_ok=True)
+
     return vector_db
 
 
@@ -206,7 +210,7 @@ def ask_agent(
                 print(f"\n🤖 回答:\n{agent_message.content}\n")
         elif "tools" in chunk:
             tool_message = chunk["tools"]["messages"][0]
-            print(f"📚 找到相关信息:")
+            print("📚 找到相关信息:")
             try:
                 import re
 
@@ -215,7 +219,7 @@ def ask_agent(
                 for doc in docs:
                     formatted_doc = doc.replace("\\n", "\n  ")
                     print(f"  {formatted_doc}")
-            except:
+            except Exception:
                 print(f"  {tool_message.content}")
 
 

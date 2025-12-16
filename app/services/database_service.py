@@ -4,7 +4,7 @@
 """
 
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from werkzeug.utils import secure_filename
 
@@ -88,7 +88,9 @@ class DatabaseService(BaseService):
                     filename = secure_filename(file.filename)
                     # 添加随机字符串避免文件名冲突
                     unique_filename = f"{uuid.uuid4().hex}_{filename}"
-                    file_path = save_uploaded_file(file, unique_filename)
+                    # FastAPI UploadFile.read 是异步协程，这里统一使用底层 file 对象
+                    real_file = getattr(file, "file", file)
+                    file_path = save_uploaded_file(real_file, unique_filename)
                     file_paths.append(file_path)
                     self.log_info(f"保存文件: {unique_filename}")
 
@@ -137,7 +139,9 @@ class DatabaseService(BaseService):
                     # 安全地获取文件名并保存
                     filename = secure_filename(file.filename)
                     unique_filename = f"{uuid.uuid4().hex}_{filename}"
-                    file_path = save_uploaded_file(file, unique_filename)
+                    # FastAPI UploadFile.read 是异步协程，这里统一使用底层 file 对象
+                    real_file = getattr(file, "file", file)
+                    file_path = save_uploaded_file(real_file, unique_filename)
                     file_paths.append(file_path)
                     self.log_info(f"添加文件: {unique_filename}")
 
