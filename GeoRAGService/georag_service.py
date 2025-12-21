@@ -41,10 +41,8 @@ MCP_CONFIG = {
         "transport": "stdio",
     },
     "pygeomodels": {
-        "command": "/opt/homebrew/Caskroom/miniconda/base/envs/gptac_new/bin/python",
-        "args": [
-            "/Users/wuchenglong/Desktop/GraduationDesigh/pygeomodels/pygeomodels_service.py"
-        ],
+        "command": "/opt/homebrew/Caskroom/miniconda/base/envs/pygeomodels/bin/python",
+        "args": ["/Users/wuchenglong/Desktop/EGC/pygeomodels/pygeomodels_service.py"],
         "transport": "stdio",
     },
 }
