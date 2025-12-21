@@ -7,10 +7,11 @@ import os
 from typing import Dict, List, Optional
 
 from dao.DataBase import ask_agent
-from langchain.schema import AIMessage, HumanMessage, SystemMessage
+from langchain.schema import HumanMessage, SystemMessage
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
+from utils.handler import MCPToolLoggingHandler
 
 from .base_service import BaseService
 
@@ -163,7 +164,10 @@ class RAGService(BaseService):
                 agent = create_react_agent(llm, tools=mcp_tools)
 
                 # 运行 Agent
-                result = await agent.ainvoke({"messages": messages})
+                handler = MCPToolLoggingHandler(self.logger)
+                result = await agent.ainvoke(
+                    {"messages": messages}, config={"callbacks": [handler]}
+                )
                 ai_response = result["messages"][-1].content
 
                 self.log_info(f"聊天对话完成，响应长度: {len(ai_response)}")
