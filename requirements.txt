@@ -1,11 +1,15 @@
 flask
-langchain
-langchain-chroma
-langchain-community
-langchain-deepseek
-langchain-ollama
-langchain-openai
-langgraph
+langchain==0.3.7
+langchain-chroma==0.2.2
+langchain-community==0.3.7
+langchain-core==0.3.63
+langchain-deepseek==0.1.2
+langchain-ollama==0.2.3
+langchain-openai==0.3.7
+langchain-text-splitters==0.3.8
+langgraph==0.2.74
+langchain-mcp-adapters==0.1.0
+psycopg # conda 安装
 waitress
 
 # 代码检查工具

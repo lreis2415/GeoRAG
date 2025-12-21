@@ -92,8 +92,11 @@ async def chat_with_agent(
 
         # 获取MCP工具
         mcp_service_instance = get_global_mcp_service()
+        # if not mcp_service_instance.is_mcp_initialized():
+        #     await mcp_service_instance.init_mcp_tools()
         mcp_tools = mcp_service_instance.get_mcp_tools() or []
-        logger.debug(f"会话ID: {session_id}, 历史记录: {history}")
+        logger.info(f"MCP工具: {mcp_tools}")
+        # logger.info(f"会话ID: {session_id}, 历史记录: {history}")
 
         # 调用RAG服务进行对话
         result = await rag_service.chat_with_agent(
