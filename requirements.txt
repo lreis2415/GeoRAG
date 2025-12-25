@@ -9,7 +9,7 @@ langchain-openai==0.3.7
 langchain-text-splitters==0.3.8
 langgraph==0.2.74
 langchain-mcp-adapters==0.1.0
-psycopg # conda 安装
+psycopg>=3.0.0
 waitress
 
 # 代码检查工具
