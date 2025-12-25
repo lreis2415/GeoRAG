@@ -29,8 +29,11 @@ pip install -r requirements.txt
 # 安装 pre-commit 钩子
 pre-commit install
 
-# 手动运行所有检查
+# 手动运行所有检查（所有文件）
 pre-commit run --all-files
+
+# 手动运行所有检查（仅暂存文件）
+pre-commit run
 ```
 
 ## 常用开发命令
@@ -52,20 +55,15 @@ uvicorn main:app --host 0.0.0.0 --port 7512 --reload
 
 ### 代码质量检查
 ```bash
-# 运行所有代码检查
-python scripts/check_code_quality.py
+# 运行所有 pre-commit 检查
+pre-commit run --all-files
 
-# 自动格式化代码
-python scripts/format_code.py
-
-# 运行 lint 检查
-flake8 .
-
-# 运行类型检查
-mypy .
-
-# 运行安全检查
-bandit -r .
+# 单独运行各工具
+black .              # 格式化代码
+isort .              # 排序导入
+flake8 .             # 代码风格检查
+mypy .               # 类型检查
+bandit -r .          # 安全检查
 ```
 
 ### Docker 部署
@@ -195,14 +193,12 @@ python test_mcp.py
 ### 配置文件
 - `pyproject.toml`: 所有代码质量工具的配置
 - `.pre-commit-config.yaml`: Pre-commit 钩子配置
-- `scripts/check_code_quality.py`: 代码质量检查脚本
-- `scripts/format_code.py`: 代码格式化脚本
 
 ### Git 工作流
 1. 创建功能分支
 2. 编写代码
-3. 运行 `python scripts/check_code_quality.py` 检查代码质量
-4. 如有格式问题，运行 `python scripts/format_code.py` 自动修复
+3. 运行 `pre-commit run --all-files` 检查代码质量
+4. 如有格式问题，运行 `black .` 和 `isort .` 自动修复
 5. 手动修复其他问题
 6. 提交代码（pre-commit 钩子会自动运行检查）
 7. 推送到远程仓库
