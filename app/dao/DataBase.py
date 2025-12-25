@@ -23,8 +23,10 @@ embedding_api_url = os.environ.get("EMBEDDING_API_URL")
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(parent_dir)
 current_dir = os.path.dirname(os.path.abspath(__file__))
-documents_dir = os.path.join(current_dir, "documents")
-database_dir = os.path.join(current_dir, "database")
+# 统一使用 data/ 目录存储数据
+project_root = os.path.abspath(os.path.join(current_dir, "..", ".."))
+documents_dir = os.path.join(project_root, "data", "documents")
+database_dir = os.path.join(project_root, "data", "database")
 
 # 确保目录存在
 os.makedirs(documents_dir, exist_ok=True)
@@ -164,7 +166,12 @@ def ask_agent(
     )
     if use_tools:
         # 创建工具
-        tools = [retriever.as_tool(name="info_retriever", description="信息检索工具")]
+        tools = [
+            retriever.as_tool(
+                name="info_retriever",
+                description="信息检索工具",
+            )
+        ]
     else:
         tools = []
 
@@ -232,7 +239,8 @@ def test_model(
     api_base: Optional[str] = None,
 ):
     """测试模型"""
-    print(f"\n---------------------{embed_model_name}-----------------------------")
+    separator = "-" * 40
+    print(f"\n{separator}\n{embed_model_name}\n{separator}")
     # 使用默认的animals_custom.csv文件创建测试数据库
     src_file_path = os.path.join(documents_dir, "animals_custom.csv")
     create_db(embed_model_name, db_name, [src_file_path])

@@ -6,9 +6,6 @@
 import os
 from typing import Dict, List
 
-from fastapi import HTTPException
-from fastapi.responses import FileResponse
-
 from .base_service import BaseService
 
 
@@ -22,7 +19,7 @@ class DocumentService(BaseService):
             os.path.dirname(
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             ),
-            "GeoRAGService",
+            "data",
             "documents",
         )
         os.makedirs(self.upload_folder, exist_ok=True)
