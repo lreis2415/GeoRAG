@@ -9,17 +9,15 @@ repos:
 
   # isort 导入排序工具
   - repo: https://github.com/pycqa/isort
-    rev: 6.0.1                                # 使用 5.12.0 版本
+    rev: 6.0.1
     hooks:
-      - id: isort                              # isort 导入排序钩子
-        args: ["--profile", "black"]           # 使用 Black 兼容的配置文件
+      - id: isort
 
   # flake8 代码风格检查工具
   - repo: https://github.com/pycqa/flake8
-    rev: 7.3.0                                # 使用 6.0.0 版本
+    rev: 7.3.0
     hooks:
-      - id: flake8                            # flake8 代码风格检查钩子
-        args: ["--max-line-length=88", "--extend-ignore=E203,W503"]  # 设置行长度和忽略规则
+      - id: flake8
 
   # mypy 类型检查工具
   # - repo: https://github.com/pre-commit/mirrors-mypy
