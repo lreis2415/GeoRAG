@@ -16,3 +16,26 @@
 
 # 忽略对话缓存文件
 session_*.md
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+.mypy_cache/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# 工具配置
+.codebuddy/
+.clinerules
+.trees/
