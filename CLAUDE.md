@@ -170,8 +170,8 @@ python test_mcp.py
 ## 注意事项
 
 ### 文件存储
-- 文档存储在 `GeoRAGService/documents/` 目录
-- 向量数据库存储在 `GeoRAGService/database/` 目录
+- 文档存储在 `data/documents/` 目录
+- 向量数据库存储在 `data/database/` 目录
 
 ### API 版本
 - 当前版本：1.0.0
