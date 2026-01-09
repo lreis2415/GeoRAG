@@ -24,16 +24,16 @@ MCP_CONFIG = {
     #     "url": "http://localhost:8001/mcp",
     #     "transport": "streamable_http",
     # },
-    "calculator-mcp": {
-        "command": "/opt/homebrew/bin/uv",
-        "args": [
-            "--directory",
-            "/Users/wuchenglong/Documents/LLM/MCP-Geo",
-            "run",
-            "geo_cal.py",
-        ],
-        "transport": "stdio",
-    },
+    # "calculator-mcp": {
+    #     "command": "/opt/homebrew/bin/uv",
+    #     "args": [
+    #         "--directory",
+    #         "/Users/wuchenglong/Documents/LLM/MCP-Geo",
+    #         "run",
+    #         "geo_cal.py",
+    #     ],
+    #     "transport": "stdio",
+    # },
     "pygeomodels": {
         "url": "http://localhost:8050/mcp",
         "transport": "streamable_http",
