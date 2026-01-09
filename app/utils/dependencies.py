@@ -49,10 +49,9 @@ def get_rag_service() -> RAGService:
     return RAGService()
 
 
-@lru_cache()
 def get_mcp_service() -> MCPService:
-    """获取MCP服务实例"""
-    return MCPService()
+    """获取MCP服务实例（从全局实例获取，确保与启动时初始化的是同一个）"""
+    return get_global_mcp_service()
 
 
 # 全局服务实例（用于应用生命周期管理）
@@ -73,7 +72,7 @@ def set_global_mcp_service(service: MCPService):
     _global_mcp_service = service
 
 
-# 新增：数据库 Session 依赖
+# 数据库 Session 依赖
 def get_db() -> Session:
     """获取数据库会话"""
     db = SessionLocal()
