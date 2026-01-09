@@ -58,6 +58,11 @@ class ChatRequest(BaseModel):
     use_memory: Optional[bool] = Field(
         None, description="是否使用记忆功能", example=True
     )
+    db_name: Optional[str] = Field(
+        None,
+        description="知识库名称（可选，提供时启用RAG）",
+        example="geo_knowledge_base",
+    )
 
 
 class ChatHistoryRequest(BaseModel):
