@@ -45,7 +45,8 @@ async def lifespan(app: FastAPI):
     await mcp_service.init_mcp_tools()
     set_global_mcp_service(mcp_service)
     yield
-    # 关闭时的清理工作（如果需要）
+    # 关闭时清理 MCP 资源（关闭持久化连接）
+    await mcp_service.cleanup()
 
 
 def create_app() -> FastAPI:
