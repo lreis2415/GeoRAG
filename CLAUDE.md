@@ -18,6 +18,9 @@ GeoRAG 是一个基于 Retrieval-Augmented Generation (RAG) 技术的地理信�
 - `OPENAI_API_KEY`: OpenAI API 密钥
 - `OPENAI_API_BASE`: OpenAI API 基础 URL
 - `EMBEDDING_API_URL`: 嵌入模型 API URL
+- `DB_URL`: PostgreSQL 数据库连接字符串
+- `USE_PGVECTOR`: 向量数据库后端选择 (true=pgvector, false=chromadb)
+- `DEFAULT_EMBEDDING_MODEL`: 默认嵌入模型 (text-embedding-v4)
 
 ### 依赖安装
 ```bash
@@ -104,9 +107,10 @@ app/
 
 #### 数据访问层 (dao/)
 - `VectorDB.py`: 向量数据库抽象基类
-- `FlexibleVectorDB.py`: 灵活向量数据库实现
+- `PgvectorVectorDB.py`: PostgreSQL pgvector 向量数据库实现
+- `FlexibleVectorDB.py`: ChromaDB 向量数据库实现
 - `LocalVectorDB.py`: 本地向量数据库实现 (Ollama)
-- `DataBase.py`: 基础数据库操作
+- `DataBase.py`: 基础数据库操作和工厂函数
 
 #### 工具层 (utils/)
 - `config.py`: 应用配置管理
@@ -145,6 +149,41 @@ app/
 - MCP 服务管理在 `services/mcp_service.py`
 - 支持动态工具加载和管理
 - 通过依赖注入提供全局 MCP 服务
+
+### 向量数据库配置
+项目支持两种向量数据库后端，可通过环境变量切换：
+
+#### Pgvector (推荐)
+- **优势**：统一 PostgreSQL 技术栈、ACID 事务支持、HNSW 索引高性能
+- **配置**：设置 `USE_PGVECTOR=true`
+- **要求**：PostgreSQL 16+ with pgvector 扩展
+- **数据存储**：PostgreSQL 数据库
+
+#### ChromaDB (备选)
+- **优势**：独立部署、易于测试、向后兼容
+- **配置**：设置 `USE_PGVECTOR=false`
+- **数据存储**：本地文件系统 (`data/database/`)
+
+#### 切换后端
+```bash
+# 使用 Pgvector
+export USE_PGVECTOR=true
+
+# 使用 ChromaDB
+export USE_PGVECTOR=false
+```
+
+#### 启动 Pgvector 数据库
+```bash
+# 停止并删除旧容器
+docker-compose down -v
+
+# 启动新容器 (使用 pgvector 镜像)
+docker-compose up -d
+
+# 验证 pgvector 扩展
+docker exec -it georag-postgres psql -U geo -d georag_dev -c "SELECT extname FROM pg_extension WHERE extname = 'vector';"
+```
 
 ## 测试
 
