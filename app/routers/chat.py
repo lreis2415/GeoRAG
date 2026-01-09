@@ -14,7 +14,6 @@ from app.utils.dependencies import (
     get_db,
     get_mcp_service,
     get_model_service,
-    get_rag_service,
 )
 from app.utils.models import (
     ChatHistoryRequest,
@@ -30,7 +29,6 @@ from app.utils.response import error_response, success_response
 from ..services.chat_service import ChatService
 from ..services.mcp_service import MCPService
 from ..services.model_service import ModelService
-from ..services.rag_service import RAGService
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +44,13 @@ async def chat_with_agent(
     request: ChatRequest,
     chat_service: ChatService = Depends(get_chat_service),
     model_service: ModelService = Depends(get_model_service),
-    rag_service: RAGService = Depends(get_rag_service),
     mcp_service: MCPService = Depends(
         get_mcp_service
     ),  # 用于FastAPI的依赖注入系统，确保MCP服务在调用时可用
     db: Session = Depends(get_db),
 ):
     """
-    聊天对话（支持记忆功能）
+    聊天对话（支持记忆、向量数据库 RAG 和 MCP 工具）
     """
     try:
         # 验证聊天模型是否存在
@@ -90,22 +87,23 @@ async def chat_with_agent(
                 chat_dao.save_session(db, session_id)
 
         # 获取MCP工具（使用依赖注入的服务，已在应用启动时初始化）
-        if not mcp_service.is_mcp_initialized():
-            return error_response(message="MCP 服务未初始化，请稍后重试", code=5003)
-        mcp_tools = mcp_service.get_mcp_tools() or []
-        logger.info(f"获取到 {len(mcp_tools)} 个 MCP 工具")
-        if mcp_tools:
-            logger.info(f"MCP 工具列表: {[tool.name for tool in mcp_tools]}")
+        mcp_tools = []
+        if mcp_service.is_mcp_initialized():
+            mcp_tools = mcp_service.get_mcp_tools() or []
+            logger.info(f"获取到 {len(mcp_tools)} 个 MCP 工具")
+            if mcp_tools:
+                logger.info(f"MCP 工具列表: {[tool.name for tool in mcp_tools]}")
 
-        # 调用RAG服务进行对话
-        result = await rag_service.chat_with_agent(
+        # 调用 ChatService 进行对话（新增支持 db_name）
+        result = await chat_service.chat_with_agent(
             prompt=request.prompt,
             query=request.query,
-            mcp_tools=mcp_tools,
             chat_model_name=chat_model_name,
             session_id=session_id,
             use_memory=request.use_memory,
             history=history,
+            db_name=request.db_name,  # 新增：传递知识库名称
+            mcp_tools=mcp_tools,  # 新增：传递 MCP 工具
         )
 
         # 如果使用记忆功能，保存对话记录到记忆和数据库
