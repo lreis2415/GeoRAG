@@ -130,6 +130,11 @@ class RAGService(BaseService):
             raise ValueError("query is required")
 
         self.log_info(f"开始聊天对话，模型: {chat_model_name}, 会话: {session_id}")
+        self.log_info(f"接收到 {len(mcp_tools)} 个 MCP 工具")
+        if mcp_tools:
+            self.log_info(
+                f"MCP 工具详情: {[f'{t.name}:{t.description}' for t in mcp_tools[:3]]}..."
+            )
 
         try:
             # 创建LLM
@@ -161,6 +166,9 @@ class RAGService(BaseService):
                 messages.append(HumanMessage(content=query))
 
                 # 加载 MCP 工具并创建 Agent
+                # 显式绑定工具到 LLM（确保工具调用功能正常）
+                if mcp_tools:
+                    self.log_info(f"将 {len(mcp_tools)} 个工具绑定到 agent...")
                 agent = create_react_agent(llm, tools=mcp_tools)
 
                 # 运行 Agent
