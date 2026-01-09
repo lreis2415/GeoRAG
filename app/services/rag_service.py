@@ -1,23 +1,18 @@
 """
 RAG问答服务
-负责RAG智能问答和纯对话功能
+负责RAG智能问答功能
 """
 
 import os
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from dao.DataBase import ask_agent
-from langchain.schema import HumanMessage, SystemMessage
-from langchain_ollama import ChatOllama
-from langchain_openai import ChatOpenAI
-from langgraph.prebuilt import create_react_agent
-from utils.handler import MCPToolLoggingHandler
 
 from .base_service import BaseService
 
 
 class RAGService(BaseService):
-    """RAG问答服务类"""
+    """RAG问答服务类 - 专注于知识库问答"""
 
     def __init__(self):
         super().__init__()
@@ -86,112 +81,4 @@ class RAGService(BaseService):
 
         except Exception as e:
             self.log_error(f"RAG问答失败: {e}")
-            raise
-
-    async def chat_with_agent(
-        self,
-        prompt: str,
-        query: str,
-        mcp_tools: List,
-        chat_model_name: Optional[str] = None,
-        session_id: Optional[str] = None,
-        use_memory: Optional[bool] = True,
-        history: Optional[List] = None,
-    ) -> Dict:
-        """
-        纯对话智能体的接口 - 支持记忆功能
-
-        Args:
-            prompt: 系统提示词
-            query: 用户查询
-            mcp_tools: MCP工具列表
-            chat_model_name: 聊天模型名称 (可选)
-            session_id: 会话ID (可选)
-            use_memory: 是否使用记忆功能 (可选，默认True)
-            history: 历史对话记录 (可选)
-
-        Returns:
-            智能体的回答和会话ID
-
-        Raises:
-            ValueError: 参数验证失败
-        """
-        use_api = True  # 默认使用 API
-        api_key = os.environ.get("OPENAI_API_KEY")
-        api_base = os.environ.get("OPENAI_API_BASE")
-
-        if not chat_model_name:
-            chat_model_name = self.default_chat_model
-
-        # 验证必要参数
-        if not prompt:
-            raise ValueError("prompt is required")
-        if not query:
-            raise ValueError("query is required")
-
-        self.log_info(f"开始聊天对话，模型: {chat_model_name}, 会话: {session_id}")
-        self.log_info(f"接收到 {len(mcp_tools)} 个 MCP 工具")
-        if mcp_tools:
-            self.log_info(
-                f"MCP 工具详情: {[f'{t.name}:{t.description}' for t in mcp_tools[:3]]}..."
-            )
-
-        try:
-            # 创建LLM
-            llm = (
-                ChatOpenAI(
-                    model=chat_model_name,
-                    temperature=0.1,
-                    verbose=True,
-                    api_key=api_key,
-                    base_url=api_base,
-                )
-                if use_api
-                else ChatOllama(model=chat_model_name, temperature=0.1, verbose=True)
-            )
-
-            # 处理记忆
-            if use_memory:
-                # 构建消息列表
-                messages = []
-
-                # 添加系统提示词
-                messages.append(SystemMessage(content=prompt))
-
-                # 添加历史对话
-                for msg in history:
-                    messages.append(msg)
-
-                # 添加当前用户查询
-                messages.append(HumanMessage(content=query))
-
-                # 加载 MCP 工具并创建 Agent
-                # 显式绑定工具到 LLM（确保工具调用功能正常）
-                if mcp_tools:
-                    self.log_info(f"将 {len(mcp_tools)} 个工具绑定到 agent...")
-                agent = create_react_agent(llm, tools=mcp_tools)
-
-                # 运行 Agent
-                handler = MCPToolLoggingHandler(self.logger)
-                result = await agent.ainvoke(
-                    {"messages": messages}, config={"callbacks": [handler]}
-                )
-                ai_response = result["messages"][-1].content
-
-                self.log_info(f"聊天对话完成，响应长度: {len(ai_response)}")
-
-                return {"response": ai_response, "session_id": session_id}
-
-            else:
-                # 不使用记忆，简单的一次性对话
-                messages = [SystemMessage(content=prompt), HumanMessage(content=query)]
-
-                response = llm.invoke(messages)
-
-                self.log_info(f"简单对话完成，响应长度: {len(response.content)}")
-
-                return {"response": response.content}
-
-        except Exception as e:
-            self.log_error(f"聊天对话失败: {e}")
             raise

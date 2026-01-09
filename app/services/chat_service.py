@@ -3,6 +3,7 @@
 负责聊天会话管理和对话记忆功能
 """
 
+import os
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -10,21 +11,32 @@ from typing import Dict, List, Optional
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
 from langchain.schema.messages import BaseMessage
+from langchain_core.runnables import RunnableLambda
+from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
+from langgraph.prebuilt import create_react_agent
 from sqlalchemy.orm import Session
 
 from ..dao.chat_dao import ChatDAO
+from ..utils.handler import MCPToolLoggingHandler
 from .base_service import BaseService
+from .database_service import DatabaseService
 
 
 class ChatService(BaseService):
     """聊天服务类"""
 
-    def __init__(self, db_session: Optional[Session] = None):
+    def __init__(
+        self,
+        db_session: Optional[Session] = None,
+        database_service: Optional[DatabaseService] = None,
+    ):
         """
         初始化聊天服务
 
         Args:
             db_session: 可选的数据库会话，用于测试或外部事务管理
+            database_service: 可选的数据库服务实例，用于向量数据库访问
         """
         super().__init__()
         self.chat_sessions = {}  # 内存中的会话缓存
@@ -32,6 +44,7 @@ class ChatService(BaseService):
         self.max_memory_length = 20  # 每个会话最大记忆轮次
         self.dao = ChatDAO()
         self._db_session = db_session
+        self._database_service = database_service  # 新增：DatabaseService 依赖注入
 
     def _get_db(self) -> Session:
         """获取数据库会话"""
@@ -367,3 +380,156 @@ class ChatService(BaseService):
         except Exception as e:
             self.log_error(f"检查会话存在性失败: {e}")
             return False
+
+    def _create_llm(self, chat_model_name: Optional[str] = None):
+        """
+        创建 LLM 实例
+
+        Args:
+            chat_model_name: 聊天模型名称 (可选)
+
+        Returns:
+            LLM 实例
+        """
+        use_api = True
+        api_key = os.environ.get("OPENAI_API_KEY")
+        api_base = os.environ.get("OPENAI_API_BASE")
+
+        if not chat_model_name:
+            chat_model_name = "qwen-turbo-latest"
+
+        if use_api:
+            return ChatOpenAI(
+                model=chat_model_name,
+                temperature=0.1,
+                verbose=True,
+                api_key=api_key,
+                base_url=api_base,
+            )
+        else:
+            return ChatOllama(model=chat_model_name, temperature=0.1, verbose=True)
+
+    async def chat_with_agent(
+        self,
+        prompt: str,
+        query: str,
+        chat_model_name: Optional[str] = None,
+        session_id: Optional[str] = None,
+        use_memory: Optional[bool] = True,
+        history: Optional[List] = None,
+        db_name: Optional[str] = None,
+        mcp_tools: Optional[List] = None,
+    ) -> Dict:
+        """
+        智能对话接口 - 支持记忆、向量数据库 RAG 和 MCP 工具
+
+        Args:
+            prompt: 系统提示词
+            query: 用户查询
+            chat_model_name: 聊天模型名称 (可选)
+            session_id: 会话ID (可选)
+            use_memory: 是否使用记忆功能 (可选，默认True)
+            history: 历史对话记录 (可选)
+            db_name: 知识库名称 (可选，提供时启用RAG)
+            mcp_tools: MCP工具列表 (可选)
+
+        Returns:
+            智能体的回答和会话ID
+
+        Raises:
+            ValueError: 参数验证失败
+        """
+        if not chat_model_name:
+            chat_model_name = "qwen-turbo-latest"
+
+        # 验证必要参数
+        if not prompt:
+            raise ValueError("prompt is required")
+        if not query:
+            raise ValueError("query is required")
+
+        self.log_info(f"开始聊天对话，模型: {chat_model_name}, 会话: {session_id}")
+
+        try:
+            # 1. 构建工具列表
+            tools = []
+
+            # 2. 如果提供了 db_name，添加检索工具
+            if db_name:
+                if not self._database_service:
+                    raise ValueError("DatabaseService 未初始化，无法使用向量数据库")
+
+                vector_db = self._database_service.get_vector_db(db_name)
+                if not vector_db:
+                    raise ValueError(f"知识库 '{db_name}' 未找到")
+
+                # 创建检索工具
+                vector_store = vector_db.get_vector_store()
+                retriever = vector_store.as_retriever(
+                    search_type="similarity", search_kwargs={"k": 2}
+                )
+
+                # 将同步检索器包装为异步
+                async def async_retrieve(query: str) -> str:
+                    """异步检索函数"""
+                    docs = retriever.invoke(query)
+                    # 将检索结果格式化为字符串
+                    if docs:
+                        return "\n\n".join(
+                            [
+                                f"【document {i+1}】\n{doc.page_content}"
+                                for i, doc in enumerate(docs)
+                            ]
+                        )
+                    return "未找到相关信息"
+
+                # 创建异步检索工具
+                retrieval_tool = RunnableLambda(async_retrieve).as_tool(
+                    name="info_retriever",
+                    description="信息检索工具，从知识库中查找相关信息。输入：查询问题，输出：相关文档内容。",
+                )
+                tools.append(retrieval_tool)
+                # self.log_info(f"已添加向量数据库检索工具: {db_name}")
+
+            # 3. 添加 MCP 工具（如果提供）
+            if mcp_tools:
+                tools.extend(mcp_tools)
+
+            # 4. 构建消息列表
+            messages = []
+            messages.append(SystemMessage(content=prompt))
+
+            if use_memory and history:
+                for msg in history:
+                    messages.append(msg)
+
+            messages.append(HumanMessage(content=query))
+
+            # 5. 创建并运行 Agent
+            if tools:
+                # 使用 Agent 模式
+                self.log_info(
+                    f"工具列表数量: {len(tools)}, 工具名称: {[t.name for t in tools]}"
+                )
+                llm = self._create_llm(chat_model_name)
+                agent = create_react_agent(llm, tools)
+                handler = MCPToolLoggingHandler(self.logger)
+                result = await agent.ainvoke(
+                    {"messages": messages}, config={"callbacks": [handler]}
+                )
+                self.log_info(f"Agent 调用完成，响应: {result}")
+
+                ai_response = result["messages"][-1].content
+            else:
+                # 直接对话模式（不使用工具）
+                llm = self._create_llm(chat_model_name)
+                response = await llm.ainvoke(messages)
+                ai_response = response.content
+
+            self.log_info(f"聊天对话完成，响应长度: {len(ai_response)}")
+
+            return {"response": ai_response, "session_id": session_id}
+
+        except Exception as e:
+            self.log_error(f"聊天对话失败: {e}")
+            raise
