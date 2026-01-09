@@ -41,7 +41,7 @@ pre-commit run
 ### 启动应用
 ```bash
 # 开发模式启动（推荐）
-python run.py
+python main.py
 
 # 或者使用 uvicorn 直接启动
 uvicorn main:app --host 0.0.0.0 --port 7512 --reload
