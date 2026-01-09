@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   postgres:
-    image: registry.cn-hangzhou.aliyuncs.com/onesis-geomodels/postgres:14.12-alpine
+    image: pgvector/pgvector:pg14-trixie
     container_name: georag-postgres
     restart: always
     environment:
