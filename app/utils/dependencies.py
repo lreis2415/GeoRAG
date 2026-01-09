@@ -39,8 +39,9 @@ def get_document_service() -> DocumentService:
 
 @lru_cache()
 def get_chat_service() -> ChatService:
-    """获取聊天服务实例"""
-    return ChatService()
+    """获取聊天服务实例（带 DatabaseService 注入）"""
+    database_service = get_database_service()
+    return ChatService(database_service=database_service)
 
 
 @lru_cache()
