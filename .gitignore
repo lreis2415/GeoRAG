@@ -39,3 +39,9 @@ __pycache__/
 .codebuddy/
 .clinerules
 .trees/
+
+# 测试日志
+tests/logs/
+
+# 数据
+data/
