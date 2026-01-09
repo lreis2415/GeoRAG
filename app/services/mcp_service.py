@@ -1,6 +1,9 @@
 """
 MCP工具服务
 负责MCP工具的初始化和管理
+
+使用 streamable_http 传输，MCP 服务器作为独立的 HTTP 服务运行。
+MultiServerMCPClient 内部管理连接复用，保持 client 实例存活即可。
 """
 
 import logging
@@ -9,14 +12,18 @@ from typing import List, Optional
 
 from langchain.tools import tool
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_mcp_adapters.tools import load_mcp_tools
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
 
 from .base_service import BaseService
 
+logger = logging.getLogger(__name__)
+
 # MCP服务配置
 MCP_CONFIG = {
+    # calculator-mcp 也改为 HTTP 传输（可选）
+    # "calculator-mcp": {
+    #     "url": "http://localhost:8001/mcp",
+    #     "transport": "streamable_http",
+    # },
     "calculator-mcp": {
         "command": "/opt/homebrew/bin/uv",
         "args": [
@@ -28,9 +35,8 @@ MCP_CONFIG = {
         "transport": "stdio",
     },
     "pygeomodels": {
-        "command": "/opt/homebrew/Caskroom/miniconda/base/envs/pygeomodels/bin/python",
-        "args": ["/Users/wuchenglong/Desktop/EGC/pygeomodels/pygeomodels_service.py"],
-        "transport": "stdio",
+        "url": "http://localhost:8050/mcp",
+        "transport": "streamable_http",
     },
 }
 
@@ -58,30 +64,52 @@ class MCPService(BaseService):
 
     def __init__(self):
         super().__init__()
-        self.mcp_tools = None
-        self.mcp_session = None
-        self.mcp_config = MCP_CONFIG["calculator-mcp"]
-        self.mcp_server_params = StdioServerParameters(
-            command=self.mcp_config["command"],
-            args=self.mcp_config["args"],
-        )
+        self.mcp_tools: Optional[List] = None
+        self.mcp_client: Optional[MultiServerMCPClient] = None
+        # 移除 StdioServerParameters，不再需要
 
     async def init_mcp_tools(self):
         """
         初始化 MCP 工具
 
-        思路1：创建 MCP 客户端，client.get_tools()，成功！
+        MultiServerMCPClient 内部会管理连接的创建和复用。
+        保持 client 实例存活，后续工具调用会自动复用已建立的连接。
         """
+        logger.info("开始初始化 MCP 工具...")
         try:
-            client = MultiServerMCPClient(MCP_CONFIG)
-            # 加载 MCP 工具
-            self.mcp_tools = await client.get_tools()
-            self.mcp_session = client
-            self.log_info("MCP工具初始化成功")
+            # 创建客户端并保持引用
+            self.mcp_client = MultiServerMCPClient(MCP_CONFIG)
+            logger.info(f"MultiServerMCPClient 创建成功: {self.mcp_client}")
+            # 加载工具
+            self.mcp_tools = await self.mcp_client.get_tools()
+
+            self.log_info(
+                f"MCP工具初始化成功，共 {len(self.mcp_tools)} 个工具，"
+                f"已连接 {len(MCP_CONFIG)} 个服务器"
+            )
         except Exception as e:
+            logger.error(f"MCP工具初始化失败: {e}", exc_info=True)
             self.log_error(f"MCP工具初始化失败: {e}")
             self.mcp_tools = []
-            self.mcp_session = None
+            self.mcp_client = None
+
+    async def reload_mcp_tools(self) -> List:
+        """
+        重新加载 MCP 工具
+
+        当工具列表可能变化时调用。
+
+        Returns:
+            重新加载后的工具列表
+        """
+        if self.mcp_client:
+            try:
+                self.mcp_tools = await self.mcp_client.get_tools()
+                self.log_info(f"MCP工具重新加载完成，共 {len(self.mcp_tools)} 个工具")
+            except Exception as e:
+                self.log_error(f"MCP工具重新加载失败: {e}")
+                self.mcp_tools = []
+        return self.mcp_tools or []
 
     def get_mcp_tools(self) -> Optional[List]:
         """
@@ -92,14 +120,23 @@ class MCPService(BaseService):
         """
         return self.mcp_tools
 
-    def get_mcp_session(self):
+    def get_mcp_client(self) -> Optional[MultiServerMCPClient]:
         """
-        获取MCP会话
+        获取MCP客户端实例
 
         Returns:
-            MCP会话实例
+            MCP客户端实例
         """
-        return self.mcp_session
+        return self.mcp_client
+
+    def get_mcp_session(self):
+        """
+        获取MCP客户端实例（兼容旧接口）
+
+        Returns:
+            MCP客户端实例
+        """
+        return self.mcp_client
 
     def is_mcp_initialized(self) -> bool:
         """
@@ -108,7 +145,24 @@ class MCPService(BaseService):
         Returns:
             是否已初始化
         """
-        return self.mcp_tools is not None and self.mcp_session is not None
+        result = self.mcp_client is not None and self.mcp_tools is not None
+        if not result:
+            logger.warning(
+                f"MCP 未初始化: mcp_client={self.mcp_client}, mcp_tools={self.mcp_tools}"
+            )
+        return result
+
+    async def cleanup(self):
+        """
+        清理 MCP 资源
+
+        在应用关闭时调用。
+        注意：MultiServerMCPClient 没有显式的 close 方法，
+        当 client 对象被销毁时，底层的 stdio 进程会自动终止。
+        """
+        self.mcp_client = None
+        self.mcp_tools = None
+        self.log_info("MCP 资源引用已清理")
 
     def get_example_tools(self) -> List:
         """
