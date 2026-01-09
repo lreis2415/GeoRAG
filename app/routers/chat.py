@@ -12,7 +12,6 @@ from app.dao.chat_dao import ChatDAO
 from app.utils.dependencies import (
     get_chat_service,
     get_db,
-    get_global_mcp_service,
     get_mcp_service,
     get_model_service,
     get_rag_service,
@@ -90,13 +89,13 @@ async def chat_with_agent(
             if session_id:
                 chat_dao.save_session(db, session_id)
 
-        # 获取MCP工具
-        mcp_service_instance = get_global_mcp_service()
-        # if not mcp_service_instance.is_mcp_initialized():
-        #     await mcp_service_instance.init_mcp_tools()
-        mcp_tools = mcp_service_instance.get_mcp_tools() or []
-        logger.info(f"MCP工具: {mcp_tools}")
-        # logger.info(f"会话ID: {session_id}, 历史记录: {history}")
+        # 获取MCP工具（使用依赖注入的服务，已在应用启动时初始化）
+        if not mcp_service.is_mcp_initialized():
+            return error_response(message="MCP 服务未初始化，请稍后重试", code=5003)
+        mcp_tools = mcp_service.get_mcp_tools() or []
+        logger.info(f"获取到 {len(mcp_tools)} 个 MCP 工具")
+        if mcp_tools:
+            logger.info(f"MCP 工具列表: {[tool.name for tool in mcp_tools]}")
 
         # 调用RAG服务进行对话
         result = await rag_service.chat_with_agent(
