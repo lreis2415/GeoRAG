@@ -3,13 +3,15 @@ Tests for chat_service.py
 """
 
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy.orm import Session
 
 from app.services.chat_service import ChatService
+
+# 添加 patch 到导入，以便在测试中使用
 
 # ==================== Fixtures ====================
 
@@ -33,11 +35,64 @@ def mock_dao():
 
 
 @pytest.fixture
+def mock_database_service():
+    """Mock DatabaseService"""
+    db_service = MagicMock()
+    db_service.get_vector_db = MagicMock(return_value=None)
+    return db_service
+
+
+@pytest.fixture
 def service(mock_dao, mock_db):
     """创建 ChatService 实例"""
-    service = ChatService(db_session=mock_db)
+    service = ChatService(db_session=mock_db, database_service=None)
     service.dao = mock_dao
     return service
+
+
+@pytest.fixture
+def service_with_db(mock_dao, mock_db, mock_database_service):
+    """创建带 DatabaseService 的 ChatService 实例"""
+    service = ChatService(db_session=mock_db, database_service=mock_database_service)
+    service.dao = mock_dao
+    return service
+
+
+@pytest.fixture
+def mock_vector_db():
+    """Mock 向量数据库"""
+    vector_db = MagicMock()
+    vector_store = MagicMock()
+    retriever = MagicMock()
+    tool = MagicMock()
+    tool.name = "info_retriever"
+
+    retriever.as_tool.return_value = tool
+    vector_store.as_retriever.return_value = retriever
+    vector_db.get_vector_store.return_value = vector_store
+    return vector_db
+
+
+@pytest.fixture
+def mock_llm():
+    """Mock LLM"""
+    llm = MagicMock()
+    response = MagicMock()
+    response.content = "这是AI的回复"
+    llm.ainvoke = AsyncMock(return_value=response)
+    return llm
+
+
+@pytest.fixture
+def mock_agent():
+    """Mock Agent"""
+    agent = MagicMock()
+    result = MagicMock()
+    message = MagicMock()
+    message.content = "这是Agent的回复"
+    result["messages"] = [message]
+    agent.ainvoke = AsyncMock(return_value=result)
+    return agent
 
 
 # ==================== 测试创建会话 ====================
@@ -431,3 +486,203 @@ def test_session_exists_empty_list(service, mock_dao, mock_db):
     result = service.session_exists("test-session", db=mock_db)
 
     assert result is False
+
+
+# ==================== 测试 chat_with_agent ====================
+
+
+@pytest.mark.asyncio
+async def test_chat_with_agent_no_tools_no_memory(service, mock_llm):
+    """测试纯对话模式（不使用工具，不使用记忆）"""
+    with patch.object(service, "_create_llm", return_value=mock_llm):
+        result = await service.chat_with_agent(
+            prompt="你是一个友好的助手",
+            query="你好",
+            use_memory=False,
+        )
+
+        assert result["response"] == "这是AI的回复"
+        mock_llm.ainvoke.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_chat_with_agent_with_memory(service, mock_llm, mock_dao, mock_db):
+    """测试对话 + 记忆模式"""
+    history = [
+        HumanMessage(content="你好"),
+        AIMessage(content="你好！"),
+    ]
+
+    with patch.object(service, "_create_llm", return_value=mock_llm):
+        result = await service.chat_with_agent(
+            prompt="你是一个友好的助手",
+            query="我叫小明",
+            use_memory=True,
+            history=history,
+        )
+
+        assert result["response"] == "这是AI的回复"
+
+
+@pytest.mark.asyncio
+async def test_chat_with_agent_with_rag(
+    service_with_db, mock_llm, mock_vector_db, mock_database_service
+):
+    """测试对话 + RAG 模式"""
+    mock_database_service.get_vector_db.return_value = mock_vector_db
+
+    with patch.object(service_with_db, "_create_llm", return_value=mock_llm):
+        result = await service_with_db.chat_with_agent(
+            prompt="你是一个地理专家",
+            query="什么是数字地形模型？",
+            db_name="geo_knowledge",
+            use_memory=False,
+        )
+
+        assert result["response"] == "这是AI的回复"
+        mock_database_service.get_vector_db.assert_called_once_with("geo_knowledge")
+
+
+@pytest.mark.asyncio
+async def test_chat_with_agent_with_mcp_tools(service, mock_agent):
+    """测试对话 + MCP 工具模式"""
+    mcp_tools = [MagicMock(name="calculator")]
+
+    with patch("app.services.chat_service.create_react_agent", return_value=mock_agent):
+        with patch.object(service, "_create_llm"):
+            result = await service.chat_with_agent(
+                prompt="你是一个助手",
+                query="帮我计算 2+2",
+                mcp_tools=mcp_tools,
+                use_memory=False,
+            )
+
+            assert result["response"] == "这是Agent的回复"
+
+
+@pytest.mark.asyncio
+async def test_chat_with_agent_with_rag_and_tools(
+    service_with_db, mock_agent, mock_vector_db, mock_database_service
+):
+    """测试对话 + RAG + MCP 工具模式"""
+    mock_database_service.get_vector_db.return_value = mock_vector_db
+    mcp_tools = [MagicMock(name="calculator")]
+
+    with patch("app.services.chat_service.create_react_agent", return_value=mock_agent):
+        with patch.object(service_with_db, "_create_llm"):
+            result = await service_with_db.chat_with_agent(
+                prompt="你是一个地理专家",
+                query="请分析地形数据",
+                db_name="geo_knowledge",
+                mcp_tools=mcp_tools,
+                use_memory=False,
+            )
+
+            assert result["response"] == "这是Agent的回复"
+
+
+@pytest.mark.asyncio
+async def test_chat_with_agent_db_not_found(service_with_db, mock_database_service):
+    """测试知识库不存在的情况"""
+    mock_database_service.get_vector_db.return_value = None
+
+    with pytest.raises(ValueError) as exc_info:
+        await service_with_db.chat_with_agent(
+            prompt="你是一个助手",
+            query="你好",
+            db_name="nonexistent_db",
+            use_memory=False,
+        )
+
+    assert "知识库 'nonexistent_db' 未找到" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_chat_with_agent_db_service_not_initialized(service):
+    """测试 DatabaseService 未初始化的情况"""
+    # 创建一个没有 DatabaseService 的实例
+    service_no_db = ChatService(db_session=None, database_service=None)
+
+    with pytest.raises(ValueError) as exc_info:
+        await service_no_db.chat_with_agent(
+            prompt="你是一个助手",
+            query="你好",
+            db_name="some_db",
+            use_memory=False,
+        )
+
+    assert "DatabaseService 未初始化" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_chat_with_agent_missing_prompt(service):
+    """测试缺少 prompt 参数"""
+    with pytest.raises(ValueError) as exc_info:
+        await service.chat_with_agent(
+            prompt="",
+            query="你好",
+            use_memory=False,
+        )
+
+    assert str(exc_info.value) == "prompt is required"
+
+
+@pytest.mark.asyncio
+async def test_chat_with_agent_missing_query(service):
+    """测试缺少 query 参数"""
+    with pytest.raises(ValueError) as exc_info:
+        await service.chat_with_agent(
+            prompt="你是一个助手",
+            query="",
+            use_memory=False,
+        )
+
+    assert str(exc_info.value) == "query is required"
+
+
+@pytest.mark.asyncio
+async def test_chat_with_agent_with_session_id(service, mock_llm):
+    """测试带 session_id 的对话"""
+    with patch.object(service, "_create_llm", return_value=mock_llm):
+        result = await service.chat_with_agent(
+            prompt="你是一个助手",
+            query="你好",
+            session_id="test-session-123",
+            use_memory=False,
+        )
+
+        assert result["response"] == "这是AI的回复"
+        assert result["session_id"] == "test-session-123"
+
+
+# ==================== 测试 _create_llm ====================
+
+
+def test_create_llm_with_default_model(service):
+    """测试使用默认模型创建 LLM"""
+    with patch("app.services.chat_service.ChatOpenAI") as mock_chat_openai:
+        mock_llm_instance = MagicMock()
+        mock_chat_openai.return_value = mock_llm_instance
+
+        result = service._create_llm()
+
+        mock_chat_openai.assert_called_once()
+        assert result == mock_llm_instance
+
+
+def test_create_llm_with_custom_model(service):
+    """测试使用自定义模型创建 LLM"""
+    with patch("app.services.chat_service.ChatOpenAI") as mock_chat_openai:
+        mock_llm_instance = MagicMock()
+        mock_chat_openai.return_value = mock_llm_instance
+
+        result = service._create_llm("qwen-plus-2025-07-28")
+
+        mock_chat_openai.assert_called_once_with(
+            model="qwen-plus-2025-07-28",
+            temperature=0.1,
+            verbose=True,
+            api_key=mock_chat_openai.call_args[1]["api_key"],  # 从环境变量获取
+            base_url=mock_chat_openai.call_args[1]["base_url"],  # 从环境变量获取
+        )
+        assert result == mock_llm_instance
