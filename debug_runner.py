@@ -1,58 +1,37 @@
 import asyncio
-from dotenv import load_dotenv
+import sys
+import os
 
-# 引入 LangChain 模型适配器
+# 1. 环境路径设置
+sys.path.append(os.getcwd())
+from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
-#from langchain_google_genai import ChatGoogleGenerativeAI
-# 引入你的 Agent
-# 假设你的 agent 代码在 app/services/geoopt_service.py
+
+# 2. 引入业务类
 from app.geo_opt.geo_opt_agent import GeoOptInteractionAgent
 
-# 加载 .env 环境变量 (如果有 API Key)
 load_dotenv()
 
 
 # ============================================
-# 1. 定义一个简单的 ChatService 适配器
-#    用于剥离 FastAPI 依赖，直接连接 LLM
+# 简单的 ChatService 适配器
 # ============================================
 class DebugChatService:
-    def __init__(self, use_local=True):
-        # --- 配置你的 LLM ---
+    def __init__(self, use_local=False):
         if use_local:
-            # 选项 A: 使用本地 Ollama (免费，适合调试)
-            #print("🔌 连接到本地 Ollama (qwen2.5-coder)...")
-            #self.llm = ChatOllama(model="qwen2.5-coder:latest", temperature=0)
-            '''print("🔌 连接到 Google Gemini API (gemini-3.0-flash)...")
-
-            # 获取 API Key (建议放入 .env 文件: GOOGLE_API_KEY=AIzaSy...)
-            google_api_key = "AIzaSyC6-beXvvi3BtuQzplBMwGMQM__T7Cgq9s"
-
-            if not google_api_key:
-                raise ValueError("❌ 未找到 GOOGLE_API_KEY，请在 .env 文件中配置。")
-
-            self.llm = ChatGoogleGenerativeAI(
-                model="gemini-3.0-flash",  # 或者 "gemini-1.5-flash"
-                google_api_key=google_api_key,
-                temperature=0,
-                convert_system_message_to_human=True  # 有些旧版 Gemini 不支持 System Message，加这个保险
-            )'''
+            # 本地模型配置 (略)
+            pass
         else:
-            # =====================================================
-            # 👇 这里填你的阿里云配置
-            # =====================================================
+            # 阿里云 / OpenAI 配置
+            api_key = os.environ.get("DASHSCOPE_API_KEY")  # 建议从 env 读取
+            if not api_key:
+                # 这里的 fallback 仅用于演示，实际请配置环境变量
+                api_key = "sk-xxxxxxxxxxxxxxxxxxxxxxxx"
 
-            # 1. 把你的 Key 填在下面引号里 (sk-xxxxxxxx)
-            api_key = "sk-92109e5885764a32972905d021e84b6a"
-
-            # 2. 阿里云兼容模式的固定地址 (不要改)
             base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            model_name = "qwen-plus"  # 推荐使用更强的模型
 
-            # 3. 模型名称 (例如: qwen-plus, qwen-max, qwen-turbo)
-            model_name = "qwen-turbo-latest"
-
-            print(f"🔌 连接到阿里云 API ({model_name})...")
-
+            print(f"🔌 连接到 API ({model_name})...")
             self.llm = ChatOpenAI(
                 api_key=api_key,
                 base_url=base_url,
@@ -61,31 +40,48 @@ class DebugChatService:
             )
 
     def _create_llm(self, model_name=None):
-        """适配 Agent 中调用的方法"""
         return self.llm
 
 
 # ============================================
-# 2. 交互循环主程序
+# 主程序
 # ============================================
 async def main():
-    # 1. 初始化服务
-    # 修改 use_local=True 使用 Ollama，False 使用 API
-    chat_service = DebugChatService(use_local=False)
-
-    # 实例化 Agent (model_service 传 None 即可，因为调试时只测交互)
-    agent = GeoOptInteractionAgent(model_service=None, chat_service=chat_service)
-
-    session_id = "DEBUG_SESSION_001"
-
     print("\n" + "=" * 60)
-    print("🛠️  GeoOpt Agent 本地调试终端")
-    print("在此窗口输入内容，即可直接与 Agent 交互。")
-    print("输入 'exit' 或 'quit' 退出。")
-    print("=" * 60 + "\n")
+    print("🛠️  GeoOpt Unified Debugger (统一调试器)")
+    print("=" * 60)
+
+    # 1. 选择运行模式
+    print("\n请选择运行模式 (输入数字):")
+    print(" [0] Chat Mode    : 仅与 LLM 对话，不启动任何专家 (Raw LLM)")
+    print(" [1] Expert 1 Only: 仅启动需求分析专家 (Requirement Agent)")
+    print(" [2] Up to Exp 2  : 需求分析 -> 数学建模 (Math Agent)")
+    print(" [3] Full Chain   : 需求分析 -> 数学建模 -> 代码生成 (Code Agent)")
 
     while True:
-        # 2. 获取用户输入
+        mode_input = input("\n请选择模式 (0-3): ").strip()
+        if mode_input in ["0", "1", "2", "3"]:
+            mode = int(mode_input)
+            break
+        print("❌ 输入无效，请输入 0, 1, 2 或 3")
+
+    print(f"\n✅ 已选择模式: [{mode}]")
+    print("-" * 60)
+
+    # 2. 初始化 Agent
+    # 注意：这里不需要手动初始化 Math/Code Agent，GeoOptInteractionAgent 内部会根据模式自动处理
+    chat_service = DebugChatService(use_local=False)
+    agent = GeoOptInteractionAgent(model_service=None, chat_service=chat_service)
+
+    session_id = "DEBUG_SESSION_UNIFIED"
+
+    # 3. 交互循环
+    print("\n💬 开始对话 (输入 'exit' 退出)...")
+
+    # 如果是为了测试 Expert 2/3，可以预置一句 Prompt 快速跳过寒暄
+    # user_input = "帮我制定游乌镇2013-2017年的治理方案，目标是减沙和省钱，预算70万，坡度大于15度退耕，用SLPPOS和生态林草、封禁措施"
+
+    while True:
         try:
             user_input = input("\n👤 [User]: ").strip()
         except EOFError:
@@ -96,16 +92,18 @@ async def main():
             print("👋 退出调试。")
             break
 
-        # 3. 调用 Agent
-        print("\n⏳ Agent 思考中...", end="", flush=True)
-        try:
-            result = await agent.interact(user_input, session_id)
+        print("\n⏳ Agent Running...", end="", flush=True)
 
-            # 4. 打印 Agent 的最终回复
+        try:
+            # 关键：将 mode 传入 interact 方法
+            result = await agent.interact(user_input, session_id, execution_mode=mode)
+
             print(f"\n\n🤖 [Agent Reply]:\n{result['response']}")
 
-            # 5. (可选) 打印当前的 Session 状态快照
-            # print(f"\n📊 [State Snapshot]: step={result['step']}")
+            # 如果任务结束且不需要继续对话 (针对 Mode 2/3 生成完就停止的场景)
+            if result.get("step") == "FINISH_ALL" and mode == 3:
+                print("\n🎉 全流程执行完毕，调试器准备退出 (或继续输入以开启新会话)")
+                # break # 如果想跑完一次就退，取消注释
 
         except Exception as e:
             print(f"\n❌ 发生错误: {e}")

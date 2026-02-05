@@ -39,25 +39,20 @@ class CodeGeneratorAgent(BaseService):
 
         **1. 约束逻辑翻译 (Custom Constraint Logic):**
         如果遇到 `type: "Custom_Python"` (通常对应数学里的 "Physical_feasibility" 或 "slope" 限制)，请编写如下逻辑：
-        - 从 `context.cfg.gene_to_unit` 获取基因对应的单元 ID。
-        - 从 `context.cfg.units_infos` 获取该单元的属性（如 slope）。
+        - 从 `context.gene_to_unit` 获取基因对应的单元 ID。
+        - 从 `context.units_infos` 获取该单元的属性（如 slope）。
         - 编写判断：如果 `slope > 阈值` 且 `val` 不符合要求，返回 `False`。
 
-        *参考示例 (针对 "Slope > 15 必须封禁"):*
+        *参考示例 (针对 "Slope > 15 必须封禁"这一约束条件，具体代码需要根据用户需求里的约束动态生成):*
         ```python
         def validate(individual, context, mode):
             if str(mode) != 'ConstraintMode.PRE_EVALUATION': return True
-            cfg = context.cfg
-
+            
             for idx, val in enumerate(individual):
                 if val == 1: continue # 已经是封禁，合规
 
-                # 计算空间属性（需要用户在unit info中提供每个空间单元的slope值，若存在则继续判断，若不存在则直接跳过）
-                uid = cfg.gene_to_unit.get(idx)
-                if not uid: continue
-                u_info = cfg.units_infos.get('units', {{}}).get(uid, {{}})
-                slope = u_info.get('slope', 0)
-
+                # 计算空间属性的思路：需要用户在unit info中提供每个空间单元的slope值，若存在则继续判断，若不存在则直接跳过）
+            
                 # 核心判断
                 if slope > 15: return False
             return True
@@ -68,7 +63,7 @@ class CodeGeneratorAgent(BaseService):
         - 必须确保 `evaluator` 下包含 `seims` 键，并填入 `MODEL_DIR`, `BIN_DIR`。
         - 将 `solver` 中的 `Type` 修正为标准名称 (如 "NSGA2")，如果原输入是 "NSGA2-SpatioTemporal"，也只填 "NSGA2" (框架会自动识别时间变量)。
 
-        ### 📝 目标代码模板 (必须完全一致):
+        ### 📝 目标代码模板:
         ```python
         import sys
         import os
@@ -76,8 +71,8 @@ class CodeGeneratorAgent(BaseService):
         # 1. 路径注入
         sys.path.append(r"{seims_root}")
 
-        from app.services.geo_opt.optimization_framework.utils.factory import OptimizationFactory
-        from app.services.geo_opt.optimization_framework.utils.visualizer import OptimizationVisualizer
+        from optimization_framework.utils.factory import OptimizationFactory
+        from optimization_framework.utils.visualizer import OptimizationVisualizer
 
         # 2. 自定义约束代码 (由 LLM 生成)
         # constraint_code_1 = \"\"\" ... \"\"\"
