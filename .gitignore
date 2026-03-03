@@ -45,3 +45,8 @@ tests/logs/
 
 # 数据
 data/
+
+# 压缩包
+*.zip
+*.tar.gz
+*.tar
