@@ -39,7 +39,7 @@ router = APIRouter()
 chat_dao = ChatDAO()
 
 
-@router.post("/chat", response_model=StandardResponse[ChatResponse])
+@router.post("/chat", response_model=StandardResponse[ChatResponse], tags=["聊天对话"])
 async def chat_with_agent(
     request: ChatRequest,
     chat_service: ChatService = Depends(get_chat_service),
@@ -125,7 +125,9 @@ async def chat_with_agent(
         return error_response(message=str(e), code=5010)
 
 
-@router.get("/chat/init", response_model=StandardResponse[ChatInitResponse])
+@router.get(
+    "/chat/init", response_model=StandardResponse[ChatInitResponse], tags=["聊天对话"]
+)
 async def init_chat_service(
     chat_service: ChatService = Depends(get_chat_service), db: Session = Depends(get_db)
 ):
@@ -151,7 +153,11 @@ async def init_chat_service(
         return error_response(message=f"无法初始化聊天服务: {str(e)}", code=5015)
 
 
-@router.get("/chat/sessions", response_model=StandardResponse[SessionsResponse])
+@router.get(
+    "/chat/sessions",
+    response_model=StandardResponse[SessionsResponse],
+    tags=["聊天对话"],
+)
 async def get_chat_sessions(
     db: Session = Depends(get_db), chat_service: ChatService = Depends(get_chat_service)
 ):
@@ -175,7 +181,11 @@ async def get_chat_sessions(
         return error_response(message=f"无法获取会话信息: {str(e)}", code=5011)
 
 
-@router.delete("/chat/sessions/{session_id}", response_model=StandardResponse[None])
+@router.delete(
+    "/chat/sessions/{session_id}",
+    response_model=StandardResponse[None],
+    tags=["聊天对话"],
+)
 async def delete_chat_session(
     session_id: str,
     db: Session = Depends(get_db),
@@ -200,7 +210,9 @@ async def delete_chat_session(
         return error_response(message=f"无法删除会话: {str(e)}", code=5012)
 
 
-@router.post("/chat/sessions/clear", response_model=StandardResponse[None])
+@router.post(
+    "/chat/sessions/clear", response_model=StandardResponse[None], tags=["聊天对话"]
+)
 async def clear_all_sessions(
     db: Session = Depends(get_db), chat_service: ChatService = Depends(get_chat_service)
 ):
@@ -220,7 +232,11 @@ async def clear_all_sessions(
         return error_response(message=f"无法清空会话: {str(e)}", code=5013)
 
 
-@router.post("/chat/history", response_model=StandardResponse[ChatHistoryResponse])
+@router.post(
+    "/chat/history",
+    response_model=StandardResponse[ChatHistoryResponse],
+    tags=["聊天对话"],
+)
 async def get_chat_history(
     request: ChatHistoryRequest,
     db: Session = Depends(get_db),

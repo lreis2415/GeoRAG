@@ -11,7 +11,7 @@ from app.utils.response import success_response
 router = APIRouter()
 
 
-@router.get("/health")
+@router.get("/health", tags=["系统状态"])
 async def health_check():
     """
     健康检查接口

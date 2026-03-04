@@ -12,7 +12,7 @@ from app.utils.response import error_response, success_response
 router = APIRouter()
 
 
-@router.get("/models")
+@router.get("/models", tags=["可用LLM"])
 async def get_models(model_service: ModelService = Depends(get_model_service)):
     """
     获取可用模型列表
@@ -24,5 +24,5 @@ async def get_models(model_service: ModelService = Depends(get_model_service)):
         return success_response(
             data={"embedding_models": embedding_models, "chat_models": chat_models}
         )
-    except Exception as e:
+    except Exception:
         return error_response(message="获取模型列表失败", code=5001)
