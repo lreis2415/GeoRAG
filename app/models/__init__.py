@@ -1,0 +1,32 @@
+"""
+app/models 包
+- chat_models.py   : SQLAlchemy ORM 表模型（ChatSession, ChatMessage）
+- knowledge_models.py : 知识库相关 Pydantic Schema（Request / Response）
+"""
+
+from .chat_models import ChatMessage, ChatSession
+from .knowledge_models import (
+    KnowledgeAskRequest,
+    KnowledgeBaseCreateRequest,
+    KnowledgeBaseCreateResponse,
+    KnowledgeBaseFileInfo,
+    KnowledgeBaseFilesResponse,
+    KnowledgeBaseInfo,
+    KnowledgeBaseListResponse,
+    KnowledgeBaseUpdateRequest,
+)
+
+__all__ = [
+    # ORM
+    "ChatSession",
+    "ChatMessage",
+    # Knowledge Pydantic schemas
+    "KnowledgeBaseInfo",
+    "KnowledgeBaseFileInfo",
+    "KnowledgeBaseCreateRequest",
+    "KnowledgeBaseUpdateRequest",
+    "KnowledgeAskRequest",
+    "KnowledgeBaseListResponse",
+    "KnowledgeBaseCreateResponse",
+    "KnowledgeBaseFilesResponse",
+]

@@ -3,9 +3,19 @@
 统一管理知识库和知识文件的API接口
 """
 
+from typing import Any, Dict, List
+
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import FileResponse
 
+from app.models.knowledge_models import (
+    KnowledgeAskRequest,
+    KnowledgeBaseCreateResponse,
+    KnowledgeBaseFilesResponse,
+    KnowledgeBaseInfo,
+    KnowledgeBaseListResponse,
+    KnowledgeBaseUpdateRequest,
+)
 from app.services.database_service import DatabaseService
 from app.services.document_service import DocumentService
 from app.services.model_service import ModelService
@@ -16,7 +26,7 @@ from app.utils.dependencies import (
     get_model_service,
     get_rag_service,
 )
-from app.utils.models import AskRequest
+from app.utils.models import StandardResponse
 from app.utils.response import error_response, success_response
 
 router = APIRouter()
@@ -25,33 +35,86 @@ router = APIRouter()
 # ==================== 知识库管理 ====================
 
 
-@router.get("/knowledge/bases", tags=["知识库管理"])
+@router.get(
+    "/knowledge/bases",
+    tags=["知识库管理"],
+    response_model=StandardResponse[KnowledgeBaseListResponse],
+    summary="获取所有知识库列表",
+)
 async def get_knowledge_bases(
     database_service: DatabaseService = Depends(get_database_service),
-):
+) -> StandardResponse[KnowledgeBaseListResponse]:
     """
-    获取所有知识库列表
+    返回所有知识库的概要信息，包含：
+    - `id` / `name`：标识符与显示名称
+    - `embedding_model_name`：嵌入模型
+    - `document_count`：已嵌入的文档块总数
+    - `created_at`：创建时间（ISO 8601）
+    - `description`：可选描述
     """
     try:
-        result = database_service.get_databases()
-        return success_response(data=result)
+        raw = database_service.get_databases()
+        data = KnowledgeBaseListResponse(
+            databases=raw.get("databases", []),
+            total_count=len(raw.get("databases", [])),
+        )
+        return success_response(data=data.model_dump())
     except Exception as e:
         return error_response(message=str(e), code=5002)
 
 
-@router.post("/knowledge/bases", tags=["知识库管理"])
-async def create_knowledge_base(
-    model_name: str = Form(..., description="嵌入模型名称"),
-    db_name: str = Form(..., description="知识库名称"),
-    files: list[UploadFile] = File(None, description="要导入的文件列表"),
+@router.get(
+    "/knowledge/bases/{db_name}",
+    tags=["知识库管理"],
+    response_model=StandardResponse[KnowledgeBaseInfo],
+    summary="获取单个知识库详情",
+)
+async def get_knowledge_base_detail(
+    db_name: str,
     database_service: DatabaseService = Depends(get_database_service),
-    model_service: ModelService = Depends(get_model_service),
-):
+) -> StandardResponse[KnowledgeBaseInfo]:
     """
-    创建新的知识库
+    根据知识库 ID（`db_name`）返回详细信息。
+    若知识库不存在，返回 `code=4004`。
     """
     try:
-        # 验证模型是否存在
+        info = database_service.get_knowledge_base_info(db_name)
+        if not info:
+            return error_response(message=f"知识库 '{db_name}' 未找到", code=4004)
+        return success_response(data=info)
+    except Exception as e:
+        return error_response(message=str(e), code=5002)
+
+
+@router.post(
+    "/knowledge/bases",
+    tags=["知识库管理"],
+    response_model=StandardResponse[KnowledgeBaseCreateResponse],
+    summary="创建新知识库",
+)
+async def create_knowledge_base(
+    model_name: str = Form(..., description="嵌入模型名称，需在 models.yaml 中已注册"),
+    db_name: str = Form(..., description="知识库唯一名称（集合 ID）"),
+    files: list[UploadFile] | None = File(
+        None, description="可选：创建时同步导入的文件（csv/json/txt）"
+    ),
+    database_service: DatabaseService = Depends(get_database_service),
+    model_service: ModelService = Depends(get_model_service),
+) -> StandardResponse[KnowledgeBaseCreateResponse]:
+    """
+    创建一个新的知识库集合。
+
+    - 若 `files` 不为空，文件将在创建时立即嵌入。
+    - `model_name` 必须是 `GET /llm/v1/models` 返回的有效嵌入模型。
+    - 返回 `code=4000` 表示参数错误（模型不可用 / 字段缺失）。
+
+    **请求格式**：
+    - 必须使用 multipart/form-data 编码
+    - 示例：
+      `curl -X POST -F "model_name=text-embedding-v4" -F "db_name=my_kb"`
+      `-F "files=@file.txt" http://localhost:7512/llm/v1/knowledge/bases`
+    """
+    try:
         if not model_service.validate_embedding_model(model_name):
             return error_response(message=f"嵌入模型 '{model_name}' 不可用", code=4000)
 
@@ -63,12 +126,22 @@ async def create_knowledge_base(
         return error_response(message=str(e), code=5008)
 
 
-@router.delete("/knowledge/bases/{db_name}", tags=["知识库管理"])
+@router.delete(
+    "/knowledge/bases/{db_name}",
+    tags=["知识库管理"],
+    response_model=StandardResponse[Dict[str, str]],
+    summary="删除知识库",
+)
 async def delete_knowledge_base(
-    db_name: str, database_service: DatabaseService = Depends(get_database_service)
-):
+    db_name: str,
+    database_service: DatabaseService = Depends(get_database_service),
+) -> StandardResponse[Dict[str, str]]:
     """
-    删除指定知识库
+    永久删除指定知识库及其全部向量数据。
+
+    - pgvector 后端：删除 `langchain_pg_collection` 及关联的 `langchain_pg_embedding` 记录。
+    - ChromaDB 后端：删除对应的本地目录。
+    - 若知识库不存在，返回 `code=4004`。
     """
     try:
         result = database_service.delete_database(db_name)
@@ -79,14 +152,58 @@ async def delete_knowledge_base(
         return error_response(message=str(e), code=5004)
 
 
-@router.post("/knowledge/bases/{db_name}/files", tags=["知识库管理"])
+@router.patch(
+    "/knowledge/bases/{db_name}",
+    tags=["知识库管理"],
+    response_model=StandardResponse[KnowledgeBaseInfo],
+    summary="更新知识库元数据",
+)
+async def update_knowledge_base(
+    db_name: str,
+    body: KnowledgeBaseUpdateRequest,
+    database_service: DatabaseService = Depends(get_database_service),
+) -> StandardResponse[KnowledgeBaseInfo]:
+    """
+    更新知识库的显示名称和/或描述（PATCH 语义，只修改传入的字段）。
+
+    - 若知识库不存在，返回 `code=4004`。
+    - `name` 和 `description` 均为可选，不传则保留原值。
+    """
+    try:
+        updated = database_service.update_database_metadata(
+            db_name,
+            new_name=body.name,
+            new_description=body.description,
+        )
+        return success_response(data=updated, message="知识库元数据已更新")
+    except ValueError as e:
+        return error_response(message=str(e), code=4004)
+    except Exception as e:
+        return error_response(message=str(e), code=5002)
+
+
+@router.post(
+    "/knowledge/bases/{db_name}/files",
+    tags=["知识库管理"],
+    response_model=StandardResponse[KnowledgeBaseCreateResponse],
+    summary="向知识库追加文件",
+)
 async def add_files_to_knowledge_base(
     db_name: str,
-    files: list[UploadFile] = File(..., description="要添加的文件列表"),
+    files: list[UploadFile] = File(..., description="要追加的文件列表（csv/json/txt）"),
     database_service: DatabaseService = Depends(get_database_service),
-):
+) -> StandardResponse[KnowledgeBaseCreateResponse]:
     """
-    向知识库添加文件
+    向已有知识库追加新文件并完成嵌入。
+
+    - 仅支持 `.csv` / `.json` / `.txt` 格式。
+    - 若知识库不存在，返回 `code=4000`。
+
+    **请求格式**：
+    - 必须使用 multipart/form-data 编码
+    - 示例：
+      `curl -X POST -F "files=@file1.txt" -F "files=@file2.csv"`
+      `http://localhost:7512/llm/v1/knowledge/bases/my_kb/files`
     """
     try:
         result = database_service.add_files_to_database(db_name, files)
@@ -97,15 +214,55 @@ async def add_files_to_knowledge_base(
         return error_response(message=str(e), code=5003)
 
 
+@router.get(
+    "/knowledge/bases/{db_name}/files",
+    tags=["知识库管理"],
+    response_model=StandardResponse[KnowledgeBaseFilesResponse],
+    summary="获取知识库关联文件列表",
+)
+async def get_knowledge_base_files(
+    db_name: str,
+    database_service: DatabaseService = Depends(get_database_service),
+) -> StandardResponse[KnowledgeBaseFilesResponse]:
+    """
+    返回指定知识库所关联的全部原始文件信息（文件名、大小、时间等）。
+
+    - 若知识库不存在，返回 `code=4004`。
+    """
+    try:
+        info = database_service.get_knowledge_base_info(db_name)
+        if not info:
+            return error_response(message=f"知识库 '{db_name}' 未找到", code=4004)
+
+        files = database_service.get_knowledge_base_files(db_name)
+        data = KnowledgeBaseFilesResponse(
+            db_name=db_name,
+            db_id=info.get("id"),
+            files=files,
+            total_count=len(files),
+        )
+        return success_response(data=data.model_dump())
+    except ValueError as e:
+        return error_response(message=str(e), code=4000)
+    except Exception as e:
+        return error_response(message=str(e), code=5003)
+
+
 # ==================== 知识文件管理 ====================
 
 
-@router.get("/knowledge/files", tags=["知识文件管理"])
+@router.get(
+    "/knowledge/files",
+    tags=["知识文件管理"],
+    response_model=StandardResponse[Dict[str, List[str]]],
+    summary="列出 documents 目录下的所有文件",
+)
 async def list_knowledge_files(
     document_service: DocumentService = Depends(get_document_service),
-):
+) -> StandardResponse[Dict[str, List[str]]]:
     """
-    获取所有知识文件列表
+    返回服务器 `data/documents/` 目录中的全部文件名列表，
+    格式为 `{"documents": ["file1.txt", "file2.csv", ...]}`。
     """
     try:
         documents = document_service.get_documents()
@@ -114,28 +271,48 @@ async def list_knowledge_files(
         return error_response(message="无法列出文档", code=5005)
 
 
-@router.get("/knowledge/files/{filename}/download", tags=["知识文件管理"])
+@router.get(
+    "/knowledge/files/{filename}/download",
+    tags=["知识文件管理"],
+    summary="下载指定文件",
+    response_class=FileResponse,
+    responses={
+        200: {"description": "文件二进制流"},
+        404: {"description": "文件不存在"},
+    },
+)
 async def download_knowledge_file(
-    filename: str, document_service: DocumentService = Depends(get_document_service)
+    filename: str,
+    document_service: DocumentService = Depends(get_document_service),
 ):
     """
-    下载指定知识文件
+    下载 `data/documents/` 目录中的指定文件。
+    若文件不存在，返回标准错误响应（`code=4004`，HTTP 200）。
     """
     try:
         file_path = document_service.download_document(filename)
         return FileResponse(file_path, filename=filename)
     except ValueError as e:
         return error_response(message=str(e), code=4004)
+    except FileNotFoundError as e:
+        return error_response(message=str(e), code=4004)
     except Exception:
         return error_response(message="无法下载文档", code=5006)
 
 
-@router.delete("/knowledge/files/{filename}", tags=["知识文件管理"])
+@router.delete(
+    "/knowledge/files/{filename}",
+    tags=["知识文件管理"],
+    response_model=StandardResponse[Dict[str, str]],
+    summary="删除指定文件",
+)
 async def delete_knowledge_file(
-    filename: str, document_service: DocumentService = Depends(get_document_service)
-):
+    filename: str,
+    document_service: DocumentService = Depends(get_document_service),
+) -> StandardResponse[Dict[str, str]]:
     """
-    删除指定知识文件
+    从 `data/documents/` 目录中永久删除指定文件。
+    若文件不存在，返回 `code=4004`。
     """
     try:
         result = document_service.delete_document(filename)
@@ -149,19 +326,32 @@ async def delete_knowledge_file(
 # ==================== 知识库问答 ====================
 
 
-@router.post("/knowledge/ask", tags=["知识库问答"])
+@router.post(
+    "/knowledge/ask",
+    tags=["知识库问答"],
+    response_model=StandardResponse[Dict[str, Any]],
+    summary="知识库智能问答（RAG）",
+)
 async def ask_knowledge_base(
-    request: AskRequest,
+    request: KnowledgeAskRequest,
     database_service: DatabaseService = Depends(get_database_service),
     model_service: ModelService = Depends(get_model_service),
     rag_service: RAGService = Depends(get_rag_service),
-):
+) -> StandardResponse[Dict[str, Any]]:
     """
-    知识库智能问答
-    基于RAG技术，根据用户问题从知识库中检索相关信息并生成答案
+    基于 RAG 技术对指定知识库进行智能问答。
+
+    **流程**：
+    1. 用 `embedding_model` 将 `query` 向量化
+    2. 在 `db_name` 对应的向量库中检索 Top-K 相关片段
+    3. 将检索结果与 `prompt` 拼接后调用 `chat_model_name` 生成答案
+
+    **错误码**：
+    - `4000`：模型不可用或参数错误
+    - `4004`：知识库不存在
+    - `5009`：内部推理错误
     """
     try:
-        # 验证聊天模型是否存在
         chat_model_name = (
             request.chat_model_name or model_service.get_default_chat_model()
         )
@@ -170,7 +360,6 @@ async def ask_knowledge_base(
                 message=f"聊天模型 '{chat_model_name}' 不可用", code=4000
             )
 
-        # 获取向量数据库
         vector_db = database_service.get_vector_db(request.db_name)
         if not vector_db:
             return error_response(
