@@ -12,7 +12,33 @@ CREATE EXTENSION IF NOT EXISTS vector;
 --
 -- 如果需要手动创建或自定义表结构，可以参考以下语句：
 
--- 1. 集合元数据表（可选，用于知识库管理）
+-- 1. 为 langchain_pg_collection 表添加 created_at 字段（如果不存在）
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'langchain_pg_collection' AND column_name = 'created_at'
+    ) THEN
+        ALTER TABLE langchain_pg_collection ADD COLUMN created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+    END IF;
+END $$;
+
+-- 2. 将 cmetadata 字段从 json 转换为 jsonb（如果存在且为 json 类型）
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'langchain_pg_collection' AND column_name = 'cmetadata' AND data_type = 'json'
+    ) THEN
+        ALTER TABLE langchain_pg_collection ALTER COLUMN cmetadata TYPE JSONB USING cmetadata::JSONB;
+    END IF;
+END $$;
+
+-- 3. 为 cmetadata 创建 GIN 索引以支持 JSONB 查询
+CREATE INDEX IF NOT EXISTS idx_langchain_pg_collection_cmetadata 
+    ON langchain_pg_collection USING GIN (cmetadata);
+
+-- 2. 集合元数据表（可选，用于知识库管理）
 CREATE TABLE IF NOT EXISTS vector_collections (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT UNIQUE NOT NULL,
