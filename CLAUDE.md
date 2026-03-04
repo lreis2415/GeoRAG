@@ -18,6 +18,9 @@ GeoRAG 是一个基于 Retrieval-Augmented Generation (RAG) 技术的地理信�
 - `OPENAI_API_KEY`: OpenAI API 密钥
 - `OPENAI_API_BASE`: OpenAI API 基础 URL
 - `EMBEDDING_API_URL`: 嵌入模型 API URL
+- `DB_URL`: PostgreSQL 数据库连接字符串
+- `USE_PGVECTOR`: 向量数据库后端选择 (true=pgvector, false=chromadb)
+- `DEFAULT_EMBEDDING_MODEL`: 默认嵌入模型 (text-embedding-v4)
 
 ### 依赖安装
 ```bash
@@ -29,8 +32,11 @@ pip install -r requirements.txt
 # 安装 pre-commit 钩子
 pre-commit install
 
-# 手动运行所有检查
+# 手动运行所有检查（所有文件）
 pre-commit run --all-files
+
+# 手动运行所有检查（仅暂存文件）
+pre-commit run
 ```
 
 ## 常用开发命令
@@ -38,7 +44,7 @@ pre-commit run --all-files
 ### 启动应用
 ```bash
 # 开发模式启动（推荐）
-python run.py
+python main.py
 
 # 或者使用 uvicorn 直接启动
 uvicorn main:app --host 0.0.0.0 --port 7512 --reload
@@ -52,20 +58,15 @@ uvicorn main:app --host 0.0.0.0 --port 7512 --reload
 
 ### 代码质量检查
 ```bash
-# 运行所有代码检查
-python scripts/check_code_quality.py
+# 运行所有 pre-commit 检查
+pre-commit run --all-files
 
-# 自动格式化代码
-python scripts/format_code.py
-
-# 运行 lint 检查
-flake8 .
-
-# 运行类型检查
-mypy .
-
-# 运行安全检查
-bandit -r .
+# 单独运行各工具
+black .              # 格式化代码
+isort .              # 排序导入
+flake8 .             # 代码风格检查
+mypy .               # 类型检查
+bandit -r .          # 安全检查
 ```
 
 ### Docker 部署
@@ -106,9 +107,10 @@ app/
 
 #### 数据访问层 (dao/)
 - `VectorDB.py`: 向量数据库抽象基类
-- `FlexibleVectorDB.py`: 灵活向量数据库实现
+- `PgvectorVectorDB.py`: PostgreSQL pgvector 向量数据库实现
+- `FlexibleVectorDB.py`: ChromaDB 向量数据库实现
 - `LocalVectorDB.py`: 本地向量数据库实现 (Ollama)
-- `DataBase.py`: 基础数据库操作
+- `DataBase.py`: 基础数据库操作和工厂函数
 
 #### 工具层 (utils/)
 - `config.py`: 应用配置管理
@@ -148,6 +150,41 @@ app/
 - 支持动态工具加载和管理
 - 通过依赖注入提供全局 MCP 服务
 
+### 向量数据库配置
+项目支持两种向量数据库后端，可通过环境变量切换：
+
+#### Pgvector (推荐)
+- **优势**：统一 PostgreSQL 技术栈、ACID 事务支持、HNSW 索引高性能
+- **配置**：设置 `USE_PGVECTOR=true`
+- **要求**：PostgreSQL 16+ with pgvector 扩展
+- **数据存储**：PostgreSQL 数据库
+
+#### ChromaDB (备选)
+- **优势**：独立部署、易于测试、向后兼容
+- **配置**：设置 `USE_PGVECTOR=false`
+- **数据存储**：本地文件系统 (`data/database/`)
+
+#### 切换后端
+```bash
+# 使用 Pgvector
+export USE_PGVECTOR=true
+
+# 使用 ChromaDB
+export USE_PGVECTOR=false
+```
+
+#### 启动 Pgvector 数据库
+```bash
+# 停止并删除旧容器
+docker-compose down -v
+
+# 启动新容器 (使用 pgvector 镜像)
+docker-compose up -d
+
+# 验证 pgvector 扩展
+docker exec -it georag-postgres psql -U geo -d georag_dev -c "SELECT extname FROM pg_extension WHERE extname = 'vector';"
+```
+
 ## 测试
 
 ### 测试文件
@@ -172,8 +209,8 @@ python test_mcp.py
 ## 注意事项
 
 ### 文件存储
-- 文档存储在 `GeoRAGService/documents/` 目录
-- 向量数据库存储在 `GeoRAGService/database/` 目录
+- 文档存储在 `data/documents/` 目录
+- 向量数据库存储在 `data/database/` 目录
 
 ### API 版本
 - 当前版本：1.0.0
@@ -195,14 +232,12 @@ python test_mcp.py
 ### 配置文件
 - `pyproject.toml`: 所有代码质量工具的配置
 - `.pre-commit-config.yaml`: Pre-commit 钩子配置
-- `scripts/check_code_quality.py`: 代码质量检查脚本
-- `scripts/format_code.py`: 代码格式化脚本
 
 ### Git 工作流
 1. 创建功能分支
 2. 编写代码
-3. 运行 `python scripts/check_code_quality.py` 检查代码质量
-4. 如有格式问题，运行 `python scripts/format_code.py` 自动修复
+3. 运行 `pre-commit run --all-files` 检查代码质量
+4. 如有格式问题，运行 `black .` 和 `isort .` 自动修复
 5. 手动修复其他问题
 6. 提交代码（pre-commit 钩子会自动运行检查）
 7. 推送到远程仓库

@@ -8,9 +8,11 @@ embedding_models:
 chat_models:
   - name: "qwen-turbo-latest"
     status: "active"
-  - name: "deepseek-v3"
+  - name: "deepseek-v3.2"
     status: "active"
   - name: "qwen-plus-2025-07-28"
     status: "active"
   - name: "qwen3-235b-a22b-instruct-2507"
+    status: "active"
+  - name: "qwen3-max-preview"
     status: "active"

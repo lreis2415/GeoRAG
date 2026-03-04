@@ -5,6 +5,8 @@
 
 from functools import lru_cache
 
+from sqlalchemy.orm import Session
+
 from app.services import (
     ChatService,
     DatabaseService,
@@ -13,6 +15,7 @@ from app.services import (
     ModelService,
     RAGService,
 )
+from app.services.db import SessionLocal
 
 
 # 使用lru_cache确保单例模式
@@ -36,8 +39,9 @@ def get_document_service() -> DocumentService:
 
 @lru_cache()
 def get_chat_service() -> ChatService:
-    """获取聊天服务实例"""
-    return ChatService()
+    """获取聊天服务实例（带 DatabaseService 注入）"""
+    database_service = get_database_service()
+    return ChatService(database_service=database_service)
 
 
 @lru_cache()
@@ -46,10 +50,9 @@ def get_rag_service() -> RAGService:
     return RAGService()
 
 
-@lru_cache()
 def get_mcp_service() -> MCPService:
-    """获取MCP服务实例"""
-    return MCPService()
+    """获取MCP服务实例（从全局实例获取，确保与启动时初始化的是同一个）"""
+    return get_global_mcp_service()
 
 
 # 全局服务实例（用于应用生命周期管理）
@@ -68,3 +71,13 @@ def set_global_mcp_service(service: MCPService):
     """设置全局MCP服务实例"""
     global _global_mcp_service
     _global_mcp_service = service
+
+
+# 数据库 Session 依赖
+def get_db() -> Session:
+    """获取数据库会话"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

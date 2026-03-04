@@ -1,7 +1,7 @@
-FROM docker.anye.in/library/python:3.11
+FROM registry.cn-hangzhou.aliyuncs.com/onesis-geomodels/python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1
-
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
 
@@ -12,4 +12,8 @@ WORKDIR /GeoRAGApp
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-CMD ["python3","GeoRAGApp.py"] 
+# 暴露应用端口
+EXPOSE 7512
+
+# 启动应用
+CMD ["python3", "main.py"]

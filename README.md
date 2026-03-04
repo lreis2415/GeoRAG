@@ -1,145 +1,274 @@
-# GeoRAG 项目
+# GeoRAG
 
-## 项目概述
-GeoRAG 是一个基于Retrieval-Augmented Generation (RAG) 技术的地理信息问答系统，提供文档管理、向量数据库管理以及智能问答功能。
+[中文](./README.zh-CN.md) | English
 
-## 功能特性
-- 文档管理：支持CSV、JSON、TXT格式文件的上传、下载和删除
-- 向量数据库管理：支持创建、添加文件、删除和查询向量数据库
-- 智能问答：基于RAG技术，结合向量检索和生成模型，提供准确的地理信息问答服务
-- 多模型支持：支持多种嵌入模型和聊天模型，可根据需求灵活配置
+## Overview
 
-## 快速开始
-1. 确保已安装Python 3.9+，建议版本 3.11
-2. 克隆本项目：
-   ```bash
-   git clone https://github.com/your-repo/GeoRAG.git
-   ```
-3. 安装依赖：
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. 通过命令行或者添加.env文件配置环境变量：
-   ```bash
-   export OPENAI_API_KEY=your_api_key
-   export OPENAI_API_BASE=your_api_base
-   export EMBEDDING_API_URL=your_embedding_api_url
-   ```
-5. 启动服务：
-   ```bash
-   python GeoRAGApp.py
-   ```
+GeoRAG is a geographic information Q&A system based on Retrieval-Augmented Generation (RAG) technology. It adopts a layered architecture design, providing document management, vector database management, and intelligent Q&A capabilities.
 
-## 使用说明
-### 文档管理
-- 上传文档：POST /databases/add
-- 下载文档：GET /documents/download/{filename}
-- 删除文档：DELETE /documents/delete/{filename}
-- 列出文档：GET /documents
+## Features
 
-### 数据库管理
-- 创建数据库：POST /create_db
-- 添加文件到数据库：POST /databases/add
-- 删除数据库：DELETE /databases/{db_name}
-- 获取数据库列表：GET /databases
+- **Document Management**: Upload, download, and delete CSV, JSON, and TXT format files
+- **Vector Database Management**: Create, add files, delete, and query vector databases
+- **Intelligent Q&A**: Provide accurate geographic information Q&A services based on RAG technology, combining vector retrieval and generative models
+- **Multi-Model Support**: Support multiple embedding models and chat models with flexible configuration
+- **Multi-Database**: Support both Pgvector and ChromaDB vector databases
+- **MCP Tool Integration**: Integrate Model Context Protocol tools to extend system functionality
 
-### 智能问答
-- 发起问答：POST /ask
+## Quick Start
 
-## 配置项详解
-### 环境变量
-- `OPENAI_API_KEY`: OpenAI API密钥
-- `OPENAI_API_BASE`: OpenAI API基础URL
-- `EMBEDDING_API_URL`: 嵌入模型API URL
+### Prerequisites
 
-### 模型配置（model.yaml文件，可扩展）
-嵌入模型：
-- llama3.3-70b-instruct
-- llama3.1-70b-instruct
-- text-embedding-v3
+- Python 3.9+ (3.11 recommended)
+- Docker (for containerized deployment)
 
-聊天模型：
-- qwen-turbo
-- deepseek-v3
+### Install Dependencies
 
-## API文档
-### 数据库管理API
-#### 创建数据库
-- 方法：POST
-- 路径：/create_db
-- 参数：
-  - model_name: 嵌入模型名称
-  - db_name: 数据库名称
-  - files: 要上传的文件列表（可选）
+```bash
+pip install -r requirements.txt
+```
 
-#### 添加文件到数据库
-- 方法：POST
-- 路径：/databases/add
-- 参数：
-  - db_name: 数据库名称
-  - files: 要添加的文件列表
+### Environment Variables
 
-#### 删除数据库
-- 方法：DELETE
-- 路径：/databases/{db_name}
-- 参数：
-  - db_name: 数据库名称
+Create a `.env` file or set via command line:
 
-#### 获取数据库列表
-- 方法：GET
-- 路径：/databases
+```bash
+export OPENAI_API_KEY=your_api_key
+export OPENAI_API_BASE=your_api_base
+export EMBEDDING_API_URL=your_embedding_api_url
+export DB_URL=postgresql://user:password@host:port/database
+export USE_PGVECTOR=true  # Use Pgvector (recommended)
+# export USE_PGVECTOR=false  # Use ChromaDB
+export DEFAULT_EMBEDDING_MODEL=text-embedding-v4
+```
 
-### 文档管理API
-#### 上传文档
-- 方法：POST
-- 路径：/databases/add
-- 参数：
-  - files: 要上传的文件列表
+### Start Database
 
-#### 下载文档
-- 方法：GET
-- 路径：/documents/download/{filename}
-- 参数：
-  - filename: 文件名
+**When using Pgvector, you need to start the PostgreSQL database first:**
 
-#### 删除文档
-- 方法：DELETE
-- 路径：/documents/delete/{filename}
-- 参数：
-  - filename: 文件名
+```bash
+# Start only PostgreSQL database service (local development mode)
+docker-compose up -d postgres
 
-#### 列出文档
-- 方法：GET
-- 路径：/documents
+# Verify pgvector extension is installed successfully
+docker exec -it georag-postgres psql -U geo -d georag_dev -c "SELECT extname FROM pg_extension WHERE extname = 'vector';"
 
-### 智能问答API
-#### 发起问答
-- 方法：POST
-- 路径：/ask
-- 参数：
-  - query: 用户查询
-  - db_name: 数据库名称
-  - embed_model_name: 嵌入模型名称（可选）
-  - chat_model_name: 聊天模型名称（可选）
-  - use_api: 是否使用API（可选，默认True）
+# View container logs
+docker-compose logs -f postgres
+```
 
-## 项目结构
+> **Note**: For local development, only the `postgres` service needs to be started, and the application is started via `python main.py`. For full containerized deployment, use `docker-compose up -d` to start all services.
+
+**To reset the database:**
+
+```bash
+# Stop and delete old containers and data volumes
+docker-compose down -v
+
+# Restart containers
+docker-compose up -d postgres
+```
+
+### Start Service
+
+```bash
+# Development mode start (recommended)
+python main.py
+
+# Or use uvicorn to start directly
+uvicorn main:app --host 0.0.0.0 --port 7512 --reload
+```
+
+After the service starts:
+- Service URL: http://0.0.0.0:7512
+- API Docs: http://0.0.0.0:7512/docs
+- Health Check: http://0.0.0.0:7512/llm/
+
+## Usage
+
+### Document Management
+
+| Function | Method | Path |
+|----------|--------|------|
+| Upload Document | POST | `/llm/documents/upload` |
+| Download Document | GET | `/llm/documents/download/{filename}` |
+| Delete Document | DELETE | `/llm/documents/{filename}` |
+| List Documents | GET | `/llm/documents` |
+
+### Database Management
+
+| Function | Method | Path |
+|----------|--------|------|
+| Create Database | POST | `/llm/databases` |
+| Add Files to Database | POST | `/llm/databases/add` |
+| Delete Database | DELETE | `/llm/databases/{db_name}` |
+| List Databases | GET | `/llm/databases` |
+
+### Intelligent Q&A
+
+| Function | Method | Path |
+|----------|--------|------|
+| Ask Question | POST | `/llm/chat/ask` |
+| Agent Q&A | POST | `/llm/chat/agent` |
+
+## Configuration Details
+
+### Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `OPENAI_API_KEY` | OpenAI API key | Yes |
+| `OPENAI_API_BASE` | OpenAI API base URL | Yes |
+| `EMBEDDING_API_URL` | Embedding model API URL | Yes |
+| `DB_URL` | PostgreSQL database connection string | Yes (Pgvector) |
+| `USE_PGVECTOR` | Vector database backend selection (true=pgvector, false=chromadb) | No |
+| `DEFAULT_EMBEDDING_MODEL` | Default embedding model | No |
+
+### Model Configuration (models.yaml)
+
+#### Embedding Models
+- `llama3.3-70b-instruct`
+- `llama3.1-70b-instruct`
+- `text-embedding-v4`
+
+#### Chat Models
+- `qwen-turbo-latest`
+- `deepseek-v3`
+- `qwen-plus-2025-07-28`
+- `qwen3-235b-a22b-instruct-2507`
+
+### Vector Database Backends
+
+#### Pgvector (Recommended)
+- **Advantages**: Unified PostgreSQL tech stack, ACID transaction support, high-performance HNSW indexing
+- **Configuration**: `USE_PGVECTOR=true`
+- **Requirements**: PostgreSQL 16+ with pgvector extension
+
+#### ChromaDB (Alternative)
+- **Advantages**: Standalone deployment, easy testing, backward compatibility
+- **Configuration**: `USE_PGVECTOR=false`
+- **Data Storage**: Local file system
+
+## Docker Deployment
+
+### Using Docker Compose
+
+```bash
+# Start PostgreSQL container (Pgvector)
+docker-compose up -d
+
+# Verify pgvector extension
+docker exec -it georag-postgres psql -U geo -d georag_dev -c "SELECT extname FROM pg_extension WHERE extname = 'vector';"
+```
+
+### Using Dockerfile
+
+```bash
+# Build and run Docker container
+./run_docker.sh
+```
+
+## Code Quality
+
+### Pre-commit Hooks
+
+```bash
+# Install pre-commit hooks
+pre-commit install
+
+# Manually run all checks
+pre-commit run --all-files
+```
+
+### Code Quality Tools
+
+```bash
+# Format code
+black .
+
+# Sort imports
+isort .
+
+# Code style check
+flake8 .
+
+# Type check
+mypy .
+
+# Security check
+bandit -r .
+```
+
+## Architecture
+
+### Layered Architecture Design
+
+```
+app/
+├── routers/          # API router layer - Handle HTTP requests
+├── services/         # Business logic layer - Implement core functionality
+├── dao/             # Data access layer - Database operations
+└── utils/           # Utility layer - Configuration, exception handling, etc.
+```
+
+### Project Structure
+
 ```
 GeoRAG/
 ├── .gitignore
+├── .pre-commit-config.yaml  # Pre-commit hooks configuration
 ├── Dockerfile
-├── GeoRAGApp.py  # 主应用程序入口文件
-├── models.yaml  # 模型配置文件，定义了可用的嵌入模型和聊天模型
-├── README.md
-├── requirements.txt  # 依赖包列表
-├── run_docker.sh  # 运行Docker容器的脚本
-└── GeoRAGService/  # 服务模块目录
-    ├── __init__.py
-    ├── FlexibleVectorDB.py  # 灵活的向量数据库实现
-    ├── georag_service.py  # 核心服务逻辑
-    ├── LocalVectorDB.py  # 本地向量数据库实现(Ollama)
-    ├── RAGAgent.py  # RAG代理类，处理智能问答逻辑
-    ├── VectorDB.py  # 向量数据库抽象基类
-    └── database/  # 数据库存储目录
-    └── documents/  # 文档存储目录
+├── docker-compose.yml       # Docker Compose configuration
+├── main.py                  # Main application entry point
+├── models.yaml              # Model configuration file
+├── pyproject.toml           # Code quality tools configuration
+├── requirements.txt         # Dependency list
+├── run_docker.sh            # Script to run Docker container
+├── app/                     # Application core code
+│   ├── dao/                # Data access layer
+│   │   ├── VectorDB.py          # Vector database abstract base class
+│   │   ├── PgvectorVectorDB.py  # Pgvector implementation
+│   │   ├── FlexibleVectorDB.py  # ChromaDB implementation
+│   │   └── DataBase.py          # Base database operations
+│   ├── routers/            # API router layer
+│   │   ├── chat.py             # Chat and Q&A endpoints
+│   │   ├── databases.py        # Vector database management endpoints
+│   │   ├── documents.py        # Document management endpoints
+│   │   ├── models.py           # Model management endpoints
+│   │   └── health.py           # Health check endpoint
+│   ├── services/           # Business logic layer
+│   │   ├── chat_service.py      # Chat service
+│   │   ├── database_service.py  # Database service
+│   │   ├── document_service.py  # Document service
+│   │   ├── model_service.py     # Model service
+│   │   ├── mcp_service.py       # MCP tool integration service
+│   │   └── rag_service.py       # RAG core service
+│   └── utils/              # Utility layer
+│       ├── config.py           # Application configuration management
+│       ├── dependencies.py     # Dependency injection
+│       ├── exceptions.py       # Exception handling
+│       ├── models.py           # Data models
+│       └── response.py         # Response formatting
+├── data/                  # Data storage directory
+│   ├── documents/         # Document storage
+│   └── database/          # Vector database storage (ChromaDB)
+├── tests/                 # Test files
+└── archive/               # Archive directory
+    └── GeoRAGService/     # Legacy code archive
 ```
+
+## Notes
+
+- API Documentation: Visit http://0.0.0.0:7512/docs after starting the service to view the complete interactive API documentation
+- Document Storage: `data/documents/` directory
+- Vector Database Storage:
+  - Pgvector: PostgreSQL database
+  - ChromaDB: `data/database/` directory
+
+## Development Guide
+
+For detailed development guidelines, please refer to the [CLAUDE.md](./CLAUDE.md) file.
+
+## License
+
+MIT License

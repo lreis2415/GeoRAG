@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: registry.cn-hangzhou.aliyuncs.com/onesis-geomodels/pgvector:latest
+    container_name: georag-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: georag_dev
+      POSTGRES_USER: geo
+      POSTGRES_PASSWORD: 123456
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geo -d georag_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  georag:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: georag-app
+    restart: always
+    ports:
+      - "7512:7512"
+    environment:
+      # LLM service
+      OPENAI_API_BASE: ${OPENAI_API_BASE}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      EMBEDDING_API_URL: ${EMBEDDING_API_URL}
+      # DB
+      APP_ENV: ${APP_ENV:-docker}
+      DB_URL: postgresql+psycopg://geo:123456@postgres:5432/georag_dev
+    volumes:
+      - ./data:/GeoRAGApp/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7512/llm/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  pgdata:

@@ -1,10 +1,25 @@
+#!/usr/bin/env python3
 """
-主应用文件
-整合所有模块，创建FastAPI应用实例
+GeoRAG 主应用文件
+
+功能：
+    - 定义 FastAPI 应用工厂函数
+    - 支持直接运行或作为模块导入
+
+使用方式：
+    # 开发模式启动（推荐）
+    python main.py
+
+    # 或使用 uvicorn 直接启动
+    uvicorn main:app --host 0.0.0.0 --port 7512 --reload
+
+    # 作为模块导入
+    from main import app
 """
 
 from contextlib import asynccontextmanager
 
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
@@ -18,7 +33,7 @@ from app.routers import (
 )
 from app.services import MCPService
 from app.utils.config import config
-from app.utils.dependencies import get_global_mcp_service, set_global_mcp_service
+from app.utils.dependencies import set_global_mcp_service
 from app.utils.exceptions import register_exception_handlers
 
 
@@ -30,7 +45,8 @@ async def lifespan(app: FastAPI):
     await mcp_service.init_mcp_tools()
     set_global_mcp_service(mcp_service)
     yield
-    # 关闭时的清理工作（如果需要）
+    # 关闭时清理 MCP 资源（关闭持久化连接）
+    await mcp_service.cleanup()
 
 
 def create_app() -> FastAPI:
@@ -87,3 +103,19 @@ def create_app() -> FastAPI:
 
 # 创建应用实例
 app = create_app()
+
+
+if __name__ == "__main__":
+    """直接运行此文件时启动开发服务器"""
+    print(f"🚀 启动 {config.APP_NAME}")
+    print(f"📍 服务地址: http://{config.HOST}:{config.PORT}")
+    print(f"📖 API文档: http://{config.HOST}:{config.PORT}/docs")
+    print(f"🔍 健康检查: http://{config.HOST}:{config.PORT}{config.API_PREFIX}/")
+
+    uvicorn.run(
+        "main:app",
+        host=config.HOST,
+        port=config.PORT,
+        reload=True,  # 开发模式下自动重载
+        log_level="info",
+    )

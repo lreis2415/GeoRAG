@@ -3,7 +3,7 @@
 提供向量数据库相关的API接口
 """
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from app.services.database_service import DatabaseService
 from app.services.model_service import ModelService
@@ -35,17 +35,14 @@ async def get_databases(
 
 @router.post("/databases/add")
 async def add_database(
-    request: Request, database_service: DatabaseService = Depends(get_database_service)
+    db_name: str = Form(..., description="数据库名称"),
+    files: list[UploadFile] = File(None, description="要添加的文件列表"),
+    database_service: DatabaseService = Depends(get_database_service),
 ):
     """
     向数据库添加文件
     """
     try:
-        # 获取表单数据
-        form = await request.form()
-        db_name = form.get("db_name")
-        files = form.getlist("files") if "files" in form else None
-
         result = database_service.add_files_to_database(db_name, files)
         return success_response(data=result, message="文件添加成功")
     except ValueError as e:
@@ -72,7 +69,9 @@ async def delete_db(
 
 @router.post("/create_db")
 async def create_database(
-    request: Request,
+    model_name: str = Form(..., description="嵌入模型名称"),
+    db_name: str = Form(..., description="数据库名称"),
+    files: list[UploadFile] = File(None, description="要导入的文件列表"),
     database_service: DatabaseService = Depends(get_database_service),
     model_service: ModelService = Depends(get_model_service),
 ):
@@ -80,12 +79,6 @@ async def create_database(
     创建新的向量数据库
     """
     try:
-        # 获取表单数据
-        form = await request.form()
-        model_name = form.get("model_name")
-        db_name = form.get("db_name")
-        files = form.getlist("files") if "files" in form else None
-
         # 验证模型是否存在
         if not model_service.validate_embedding_model(model_name):
             return error_response(message=f"嵌入模型 '{model_name}' 不可用", code=4000)
