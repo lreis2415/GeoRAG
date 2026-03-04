@@ -8,7 +8,6 @@ import logging
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .response import error_response
 
@@ -44,10 +43,22 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """处理请求验证异常"""
     logger.warning(f"ValidationError: {exc.errors()}")
+
+    # Convert errors to JSON-serializable format
+    serializable_errors = []
+    for error in exc.errors():
+        error_dict = dict(error)
+        # Convert non-serializable objects in ctx to strings
+        if "ctx" in error_dict and isinstance(error_dict["ctx"], dict):
+            for key, value in error_dict["ctx"].items():
+                if hasattr(value, "__class__"):
+                    error_dict["ctx"][key] = str(value)
+        serializable_errors.append(error_dict)
+
     return JSONResponse(
         status_code=422,
         content=error_response(
-            message="请求参数验证失败", code=4220, data=exc.errors()
+            message="请求参数验证失败", code=4220, data=serializable_errors
         ),
     )
 

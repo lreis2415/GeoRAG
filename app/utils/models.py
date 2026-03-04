@@ -1,6 +1,10 @@
 """
 数据模型模块
-定义API请求和响应的数据模型
+定义 API 通用请求/响应的 Pydantic 模型。
+
+业务域模型请放对应的 app/models/<domain>_models.py：
+  - 知识库相关：app/models/knowledge_models.py
+  - ORM 表模型：app/models/chat_models.py
 """
 
 from typing import Any, Dict, Generic, List, Optional, TypeVar, Union
@@ -30,7 +34,7 @@ class StandardResponse(BaseModel, Generic[T]):
 
 
 class AskRequest(BaseModel):
-    """RAG问答请求模型"""
+    """RAG问答请求模型（保留向后兼容，推荐改用 app.models.KnowledgeAskRequest）"""
 
     prompt: str = Field(
         ..., description="系统提示词", example="你是一个地理信息专家助手"
@@ -117,3 +121,19 @@ class ChatHistoryResponse(BaseModel):
     history: List[Dict[str, str]] = Field(..., description="对话历史记录")
     created_at: str = Field(..., description="会话创建时间")
     last_active: str = Field(..., description="最后活跃时间")
+
+
+# ==================== 向后兼容 re-export ====================
+# 知识库相关模型已移至 app/models/knowledge_models.py
+# 此处保留别名，避免其他模块的 import 失效
+
+from app.models.knowledge_models import (  # noqa: E402, F401
+    KnowledgeAskRequest,
+    KnowledgeBaseCreateRequest,
+    KnowledgeBaseCreateResponse,
+    KnowledgeBaseFileInfo,
+    KnowledgeBaseFilesResponse,
+    KnowledgeBaseInfo,
+    KnowledgeBaseListResponse,
+    KnowledgeBaseUpdateRequest,
+)

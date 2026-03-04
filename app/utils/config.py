@@ -92,7 +92,7 @@ class AppConfig:
     CORS_HEADERS = ["*"]
 
     # API配置
-    API_PREFIX = "/v1"
+    API_PREFIX = "/llm/v1"
     REDOC_URL = None
 
     # 响应状态码
