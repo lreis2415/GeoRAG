@@ -26,9 +26,8 @@ from fastapi.openapi.utils import get_openapi
 
 from app.routers import (
     chat_router,
-    databases_router,
-    documents_router,
     health_router,
+    knowledge_router,
     models_router,
 )
 from app.services import MCPService
@@ -79,8 +78,7 @@ def create_app() -> FastAPI:
     # 注册路由
     app.include_router(health_router, prefix=config.API_PREFIX)
     app.include_router(models_router, prefix=config.API_PREFIX)
-    app.include_router(databases_router, prefix=config.API_PREFIX)
-    app.include_router(documents_router, prefix=config.API_PREFIX)
+    app.include_router(knowledge_router, prefix=config.API_PREFIX)
     app.include_router(chat_router, prefix=config.API_PREFIX)
 
     # 自定义OpenAPI文档
