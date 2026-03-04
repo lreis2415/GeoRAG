@@ -3,7 +3,8 @@
 import os
 import shutil
 import sys
-from typing import List, Optional
+from datetime import datetime
+from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
 from langchain_ollama import ChatOllama
@@ -39,46 +40,335 @@ def get_persist_directory(db_name: str) -> str:
     return os.path.join(database_dir, db_name)
 
 
-def get_all_databases() -> List[str]:
-    """获取所有知识库名称"""
+def get_all_databases() -> List[Dict]:
+    """获取所有知识库详细信息"""
     use_pgvector = os.environ.get("USE_PGVECTOR", "true").lower() == "true"
 
     if use_pgvector:
-        # 从 PostgreSQL 查询所有集合
+        return _get_all_databases_pgvector()
+    else:
+        return _get_all_databases_chromadb()
+
+
+def _get_all_databases_pgvector() -> List[Dict]:
+    """从 PostgreSQL 获取所有知识库详细信息"""
+    try:
+        from sqlalchemy import create_engine, text
+
+        db_url = os.environ.get("DB_URL")
+        if not db_url:
+            return []
+
+        engine = create_engine(db_url)
+        with engine.connect() as conn:
+            # 查询 langchain_pg_collection 表，包含元数据和 UUID
+            result = conn.execute(
+                text(
+                    """
+                    SELECT
+                        c.uuid,
+                        c.name,
+                        c.cmetadata,
+                        c.created_at,
+                        COUNT(e.id) as document_count
+                    FROM langchain_pg_collection c
+                    LEFT JOIN langchain_pg_embedding e ON c.uuid = e.collection_id
+                    GROUP BY c.uuid, c.name, c.cmetadata, c.created_at
+                    ORDER BY c.name
+                """
+                )
+            )
+
+            databases = []
+            for row in result:
+                uuid = row[0]
+                name = row[1]
+                cmetadata = row[2] or {}
+                created_at_db = row[3]
+                document_count = row[4] or 0
+
+                # 向后兼容：如果元数据中不存在某些字段，使用默认值
+                # 对于旧知识库，name 可能不存在，使用 db_name 作为后备
+                display_name = cmetadata.get("name") if cmetadata.get("name") else name
+                # 对于旧知识库，embedding_model_name 可能不存在
+                embedding_model = cmetadata.get("embedding_model_name", "unknown")
+                # 对于旧知识库，created_at 可能不存在，使用数据库创建时间
+                created_at = cmetadata.get("created_at")
+                if not created_at and created_at_db:
+                    created_at = created_at_db.isoformat()
+                elif not created_at:
+                    created_at = datetime.now().isoformat()
+
+                # 构建知识库信息
+                db_info = {
+                    "id": str(uuid),
+                    "name": display_name,
+                    "embedding_model_name": embedding_model,
+                    "document_count": document_count,
+                    "created_at": created_at,
+                    "description": cmetadata.get("description"),
+                }
+                databases.append(db_info)
+            return databases
+    except Exception as e:
+        print(f"⚠️ 从数据库获取知识库列表失败: {e}")
+        return []
+
+
+def _get_all_databases_chromadb() -> List[Dict]:
+    """从 ChromaDB 目录获取所有知识库详细信息"""
+    if not os.path.exists(database_dir):
+        return []
+
+    databases = []
+    for db_name in os.listdir(database_dir):
+        db_path = os.path.join(database_dir, db_name)
+        if not os.path.isdir(db_path):
+            continue
+
+        # 读取元数据文件
+        metadata_file = os.path.join(db_path, "metadata.json")
+        metadata = {}
+        if os.path.exists(metadata_file):
+            try:
+                import json
+
+                with open(metadata_file, "r", encoding="utf-8") as f:
+                    metadata = json.load(f)
+            except Exception as e:
+                print(f"⚠️ 读取元数据文件失败 {db_name}: {e}")
+
+        # 获取目录创建时间作为后备
+        stat = os.stat(db_path)
+        created_at = metadata.get("created_at")
+        if not created_at:
+            created_at = datetime.fromtimestamp(stat.st_ctime).isoformat()
+
+        # 向后兼容：如果元数据中没有 name，使用 db_name
+        display_name = metadata.get("name") if metadata.get("name") else db_name
+        # 向后兼容：如果元数据中没有 embedding_model_name，使用默认值
+        embedding_model = metadata.get("embedding_model_name", "unknown")
+
+        # 获取文档数量
+        document_count = 0
         try:
-            from sqlalchemy import create_engine, text
+            from .FlexibleVectorDB import FlexibleVectorDB
 
-            db_url = os.environ.get("DB_URL")
-            if not db_url:
-                return []
+            embedding_api_url = os.environ.get("EMBEDDING_API_URL")
+            model_name = metadata.get("embedding_model_name") or os.environ.get(
+                "DEFAULT_EMBEDDING_MODEL", "text-embedding-v4"
+            )
 
+            if embedding_api_url:
+                vector_db = FlexibleVectorDB(
+                    embedding_api_url=embedding_api_url,
+                    model_name=model_name,
+                    persist_directory=db_path,
+                )
+                document_count = vector_db.get_document_count()
+        except Exception as e:
+            print(f"⚠️ 获取文档数量失败 {db_name}: {e}")
+
+        db_info = {
+            "id": db_name,
+            "name": display_name,
+            "embedding_model_name": embedding_model,
+            "document_count": document_count,
+            "created_at": created_at,
+            "description": metadata.get("description"),
+        }
+        databases.append(db_info)
+
+    return databases
+
+
+def get_database_info(db_name: str) -> Optional[Dict]:
+    """
+    获取单个知识库详细信息
+
+    Args:
+        db_name: 知识库名称
+
+    Returns:
+        知识库信息字典，不存在返回 None
+    """
+    use_pgvector = os.environ.get("USE_PGVECTOR", "true").lower() == "true"
+
+    if use_pgvector:
+        return _get_database_info_pgvector(db_name)
+    else:
+        return _get_database_info_chromadb(db_name)
+
+
+def _get_database_info_pgvector(db_name: str) -> Optional[Dict]:
+    """从 PostgreSQL 获取单个知识库详细信息"""
+    try:
+        from sqlalchemy import create_engine, text
+
+        db_url = os.environ.get("DB_URL")
+        if not db_url:
+            return None
+
+        engine = create_engine(db_url)
+        with engine.connect() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    SELECT
+                        c.uuid,
+                        c.name,
+                        c.cmetadata,
+                        c.created_at,
+                        COUNT(e.id) as document_count
+                    FROM langchain_pg_collection c
+                    LEFT JOIN langchain_pg_embedding e ON c.uuid = e.collection_id
+                    WHERE c.name = :name
+                    GROUP BY c.uuid, c.name, c.cmetadata, c.created_at
+                """
+                ),
+                {"name": db_name},
+            )
+            row = result.fetchone()
+            if not row:
+                return None
+
+            uuid = row[0]
+            name = row[1]
+            cmetadata = row[2] or {}
+            created_at_db = row[3]
+            document_count = row[4] or 0
+
+            # 向后兼容处理
+            display_name = cmetadata.get("name") if cmetadata.get("name") else name
+            embedding_model = cmetadata.get("embedding_model_name", "unknown")
+            created_at = cmetadata.get("created_at")
+            if not created_at and created_at_db:
+                created_at = created_at_db.isoformat()
+            elif not created_at:
+                created_at = datetime.now().isoformat()
+
+            return {
+                "id": str(uuid),
+                "name": display_name,
+                "embedding_model_name": embedding_model,
+                "document_count": document_count,
+                "created_at": created_at,
+                "description": cmetadata.get("description"),
+            }
+    except Exception as e:
+        print(f"⚠️ 获取知识库信息失败: {e}")
+        return None
+
+
+def _get_database_info_chromadb(db_name: str) -> Optional[Dict]:
+    """从 ChromaDB 获取单个知识库详细信息"""
+    db_path = get_persist_directory(db_name)
+    if not os.path.exists(db_path):
+        return None
+
+    # 读取元数据文件
+    metadata_file = os.path.join(db_path, "metadata.json")
+    metadata = {}
+    if os.path.exists(metadata_file):
+        try:
+            import json
+
+            with open(metadata_file, "r", encoding="utf-8") as f:
+                metadata = json.load(f)
+        except Exception as e:
+            print(f"⚠️ 读取元数据文件失败 {db_name}: {e}")
+
+    # 获取目录创建时间作为后备
+    stat = os.stat(db_path)
+    created_at = metadata.get("created_at")
+    if not created_at:
+        created_at = datetime.fromtimestamp(stat.st_ctime).isoformat()
+
+    # 向后兼容：如果元数据中没有 name，使用 db_name
+    display_name = metadata.get("name") if metadata.get("name") else db_name
+    # 向后兼容：如果元数据中没有 embedding_model_name，使用默认值
+    embedding_model = metadata.get("embedding_model_name", "unknown")
+
+    # 获取文档数量
+    document_count = 0
+    try:
+        from .FlexibleVectorDB import FlexibleVectorDB
+
+        embedding_api_url = os.environ.get("EMBEDDING_API_URL")
+        model_name = metadata.get("embedding_model_name") or os.environ.get(
+            "DEFAULT_EMBEDDING_MODEL", "text-embedding-v4"
+        )
+
+        if embedding_api_url:
+            vector_db = FlexibleVectorDB(
+                embedding_api_url=embedding_api_url,
+                model_name=model_name,
+                persist_directory=db_path,
+            )
+            document_count = vector_db.get_document_count()
+    except Exception as e:
+        print(f"⚠️ 获取文档数量失败 {db_name}: {e}")
+
+    return {
+        "id": db_name,
+        "name": display_name,
+        "embedding_model_name": embedding_model,
+        "document_count": document_count,
+        "created_at": created_at,
+        "description": metadata.get("description"),
+    }
+
+
+def get_database_files(db_name: str) -> List[Dict]:
+    """
+    获取知识库关联的文件列表
+
+    Args:
+        db_name: 知识库名称
+
+    Returns:
+        文件信息列表
+    """
+    # 从 Pgvector 元数据中获取关联的文件列表
+    files = []
+    try:
+        from sqlalchemy import create_engine, text
+
+        db_url = os.environ.get("DB_URL")
+        if db_url:
             engine = create_engine(db_url)
             with engine.connect() as conn:
-                # 查询 langchain_pg_collection 表
                 result = conn.execute(
-                    text("SELECT name FROM langchain_pg_collection ORDER BY name")
+                    text(
+                        "SELECT cmetadata FROM langchain_pg_collection "
+                        "WHERE name = :name"
+                    ),
+                    {"name": db_name},
                 )
-                databases = [row[0] for row in result]
-            return databases
-        except Exception as e:
-            print(f"⚠️ 从数据库获取知识库列表失败: {e}")
-            # 降级到文件系统查询
-            if not os.path.exists(database_dir):
-                return []
-            return [
-                d
-                for d in os.listdir(database_dir)
-                if os.path.isdir(os.path.join(database_dir, d))
-            ]
-    else:
-        # 从 ChromaDB 目录获取
-        if not os.path.exists(database_dir):
-            return []
-        return [
-            d
-            for d in os.listdir(database_dir)
-            if os.path.isdir(os.path.join(database_dir, d))
-        ]
+                row = result.fetchone()
+                if row and row[0]:
+                    metadata = row[0]
+                    files = metadata.get("files", [])
+    except Exception as e:
+        print(f"⚠️ 获取知识库文件列表失败: {e}")
+
+    # 构建文件信息列表
+    file_infos = []
+    for filename in files:
+        file_path = os.path.join(documents_dir, filename)
+        if os.path.exists(file_path):
+            stat = os.stat(file_path)
+            file_infos.append(
+                {
+                    "filename": filename,
+                    "file_path": file_path,
+                    "file_size": stat.st_size,
+                    "created_at": datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                }
+            )
+
+    return file_infos
 
 
 def delete_database(db_name: str) -> bool:
@@ -204,6 +494,29 @@ def create_db(
     # 确保数据库目录存在：即使没有文件，列表接口也能看到该数据库（仅 ChromaDB）
     if not use_pgvector and not os.path.exists(persist_directory):
         os.makedirs(persist_directory, exist_ok=True)
+
+    # 保存元数据
+    metadata = {
+        "name": db_name,  # 默认使用db_name作为显示名称
+        "embedding_model_name": model_name,
+        "created_at": datetime.now().isoformat(),
+        "document_count": 0,
+        "files": [os.path.basename(fp) for fp in (file_paths or [])],
+    }
+
+    try:
+        if use_pgvector:
+            # 更新 PostgreSQL 中的元数据
+            vector_db.update_collection_metadata(metadata)
+        else:
+            # 保存元数据到文件
+            metadata_file = os.path.join(persist_directory, "metadata.json")
+            import json
+
+            with open(metadata_file, "w", encoding="utf-8") as f:
+                json.dump(metadata, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"⚠️ 保存元数据失败: {e}")
 
     return vector_db
 
