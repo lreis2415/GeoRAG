@@ -6,6 +6,7 @@ Pgvector 向量数据库实现
 """
 
 import os
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -191,3 +192,144 @@ class PgvectorVectorDB(VectorDB):
             print(f"✅ 集合 {self._db_name} 已删除")
         except Exception as e:
             raise RuntimeError(f"删除集合失败: {str(e)}")
+
+    def get_document_count(self) -> int:
+        """
+        获取知识库中的文档数量
+
+        Returns:
+            文档数量
+        """
+        try:
+            from sqlalchemy import create_engine, text
+
+            engine = create_engine(self._connection_string)
+            with engine.connect() as conn:
+                # 查询 langchain_pg_embedding 表中属于当前 collection 的文档数量
+                result = conn.execute(
+                    text(
+                        """
+                        SELECT COUNT(*) FROM langchain_pg_embedding e
+                        JOIN langchain_pg_collection c ON e.collection_id = c.uuid
+                        WHERE c.name = :collection_name
+                    """
+                    ),
+                    {"collection_name": self._db_name},
+                )
+                count = result.scalar() or 0
+            return count
+        except Exception as e:
+            print(f"⚠️ 获取文档数量失败: {e}")
+            return 0
+
+    def get_collection_metadata(self) -> Optional[Dict]:
+        """
+        获取集合元数据
+
+        Returns:
+            元数据字典，如果不存在返回 None
+        """
+        try:
+            from sqlalchemy import create_engine, text
+
+            engine = create_engine(self._connection_string)
+            with engine.connect() as conn:
+                result = conn.execute(
+                    text(
+                        "SELECT cmetadata FROM langchain_pg_collection "
+                        "WHERE name = :name"
+                    ),
+                    {"name": self._db_name},
+                )
+                row = result.fetchone()
+                if row and row[0]:
+                    return row[0]
+            return None
+        except Exception as e:
+            print(f"⚠️ 获取集合元数据失败: {e}")
+            return None
+
+    def update_collection_metadata(self, metadata: Dict) -> None:
+        """
+        更新集合元数据。
+        如果集合记录尚不存在（懒创建），先调用 get_vector_store() 触发 PGVector
+        在 langchain_pg_collection 表中插入记录，再执行 UPDATE。
+
+        Args:
+            metadata: 元数据字典
+        """
+        import json
+
+        try:
+            from sqlalchemy import create_engine, text
+
+            engine = create_engine(self._connection_string)
+
+            # 确保 langchain_pg_collection 中已存在该集合的记录
+            with engine.connect() as conn:
+                exists = conn.execute(
+                    text("SELECT 1 FROM langchain_pg_collection WHERE name = :name"),
+                    {"name": self._db_name},
+                ).fetchone()
+
+            if not exists:
+                # 触发 PGVector 创建集合记录
+                # (PGVector.__init__ 会 CREATE TABLE / INSERT collection)
+                self.get_vector_store()
+
+            with engine.connect() as conn:
+                # psycopg3 无法自动将 dict 适配为 JSONB，需手动序列化为 JSON 字符串
+                # 使用 CAST 显式将字符串转换为 jsonb 类型
+                conn.execute(
+                    text(
+                        "UPDATE langchain_pg_collection"
+                        " SET cmetadata = CAST(:metadata AS jsonb)"
+                        " WHERE name = :name"
+                    ),
+                    {
+                        "metadata": json.dumps(metadata, ensure_ascii=False),
+                        "name": self._db_name,
+                    },
+                )
+                conn.commit()
+            print(f"✅ 集合 {self._db_name} 元数据已更新")
+        except Exception as e:
+            raise RuntimeError(f"更新集合元数据失败: {str(e)}")
+
+    def add_files(self, file_paths: List[str]) -> None:
+        """
+        向知识库添加文件
+
+        Args:
+            file_paths: 文件路径列表
+        """
+        try:
+            for file_path in file_paths:
+                if not os.path.exists(file_path):
+                    raise ValueError(f"文件不存在: {file_path}")
+
+                if file_path.endswith(".csv"):
+                    self.embed_csv(file_path)
+                elif file_path.endswith(".json"):
+                    self.embed_json(file_path)
+                elif file_path.endswith(".txt"):
+                    self.embed_txt(file_path)
+                elif file_path.startswith("http"):
+                    self.embed_webpage(file_path)
+                else:
+                    raise ValueError(f"不支持的文件类型: {file_path}")
+
+            # 更新元数据中的文档数量和文件列表
+            metadata = self.get_collection_metadata() or {}
+            metadata["document_count"] = self.get_document_count()
+            metadata["updated_at"] = datetime.now().isoformat()
+
+            # 更新文件列表：合并现有文件和新文件，去重
+            existing_files = metadata.get("files", [])
+            new_files = [os.path.basename(fp) for fp in file_paths]
+            metadata["files"] = list(set(existing_files + new_files))
+
+            self.update_collection_metadata(metadata)
+
+        except Exception as e:
+            raise RuntimeError(f"添加文件失败: {str(e)}")

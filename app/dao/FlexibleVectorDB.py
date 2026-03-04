@@ -1,4 +1,6 @@
+import json
 import os
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -32,7 +34,7 @@ class CustomEmbeddings(Embeddings):
         try:
             self.client = OpenAI(api_key=api_key, base_url=api_url)
             # 测试连接
-            print(f"✅ OpenAI 客户端初始化成功")
+            print("✅ OpenAI 客户端初始化成功")
             print(f"   API URL: {api_url}")
             print(f"   模型名称: {model_name}")
         except Exception as e:
@@ -48,9 +50,9 @@ class CustomEmbeddings(Embeddings):
 
             for i in range(0, len(texts), batch_size):
                 batch = texts[i : i + batch_size]
-                print(
-                    f"   处理批次 {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size}"
-                )
+                batch_num = i // batch_size + 1
+                total_batches = (len(texts) + batch_size - 1) // batch_size
+                print(f"   处理批次 {batch_num}/{total_batches}")
 
                 # 使用 OpenAI 客户端创建嵌入
                 response = self.client.embeddings.create(
@@ -216,7 +218,7 @@ class FlexibleVectorDB(VectorDB):
             print(f"   ✅ 文档分割完成，共 {len(documents)} 个文档块")
 
             # 嵌入文档
-            print(f"   开始嵌入文档...")
+            print("   开始嵌入文档...")
             self.embed_documents(documents)
             print(f"✅ TXT 文件处理完成: {file_path}")
 
@@ -236,3 +238,96 @@ class FlexibleVectorDB(VectorDB):
         text_splitter = RecursiveCharacterTextSplitter(**self._text_splitter_config)
         documents = text_splitter.split_documents(docs)
         self.embed_documents(documents)
+
+    def get_document_count(self) -> int:
+        """
+        获取知识库中的文档数量
+
+        Returns:
+            文档数量
+        """
+        try:
+            from langchain_chroma import Chroma
+
+            vectordb = Chroma(
+                persist_directory=self._persist_directory,
+                embedding_function=self._embeddings,
+            )
+            return vectordb._collection.count()
+        except Exception as e:
+            print(f"⚠️ 获取文档数量失败: {e}")
+            return 0
+
+    def _get_metadata_file_path(self) -> str:
+        """获取元数据文件路径"""
+        return os.path.join(self._persist_directory, "metadata.json")
+
+    def get_collection_metadata(self) -> Optional[Dict]:
+        """
+        获取集合元数据
+
+        Returns:
+            元数据字典，如果不存在返回 None
+        """
+        try:
+            metadata_file = self._get_metadata_file_path()
+            if os.path.exists(metadata_file):
+                with open(metadata_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            return None
+        except Exception as e:
+            print(f"⚠️ 获取集合元数据失败: {e}")
+            return None
+
+    def update_collection_metadata(self, metadata: Dict) -> None:
+        """
+        更新集合元数据
+
+        Args:
+            metadata: 元数据字典
+        """
+        try:
+            metadata_file = self._get_metadata_file_path()
+            with open(metadata_file, "w", encoding="utf-8") as f:
+                json.dump(metadata, f, ensure_ascii=False, indent=2)
+            print(f"✅ 集合元数据已更新: {metadata_file}")
+        except Exception as e:
+            raise RuntimeError(f"更新集合元数据失败: {str(e)}")
+
+    def add_files(self, file_paths: List[str]) -> None:
+        """
+        向知识库添加文件
+
+        Args:
+            file_paths: 文件路径列表
+        """
+        try:
+            for file_path in file_paths:
+                if not os.path.exists(file_path):
+                    raise ValueError(f"文件不存在: {file_path}")
+
+                if file_path.endswith(".csv"):
+                    self.embed_csv(file_path)
+                elif file_path.endswith(".json"):
+                    self.embed_json(file_path)
+                elif file_path.endswith(".txt"):
+                    self.embed_txt(file_path)
+                elif file_path.startswith("http"):
+                    self.embed_webpage(file_path)
+                else:
+                    raise ValueError(f"不支持的文件类型: {file_path}")
+
+            # 更新元数据中的文档数量和文件列表
+            metadata = self.get_collection_metadata() or {}
+            metadata["document_count"] = self.get_document_count()
+            metadata["updated_at"] = datetime.now().isoformat()
+
+            # 更新文件列表：合并现有文件和新文件，去重
+            existing_files = metadata.get("files", [])
+            new_files = [os.path.basename(fp) for fp in file_paths]
+            metadata["files"] = list(set(existing_files + new_files))
+
+            self.update_collection_metadata(metadata)
+
+        except Exception as e:
+            raise RuntimeError(f"添加文件失败: {str(e)}")
