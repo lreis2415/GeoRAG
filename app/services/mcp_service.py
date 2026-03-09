@@ -3,7 +3,8 @@ MCP工具服务
 负责MCP工具的初始化和管理
 
 使用 streamable_http 传输，MCP 服务器作为独立的 HTTP 服务运行。
-MultiServerMCPClient 内部管理连接复用，保持 client 实例存活即可。
+MultiServerMCPClient only stores connection config — no persistent connections
+are held. Each get_tools() call opens and closes its own ephemeral session.
 """
 
 import logging
@@ -33,8 +34,9 @@ class MCPService(BaseService):
         """
         初始化 MCP 工具
 
-        MultiServerMCPClient 内部会管理连接的创建和复用。
-        保持 client 实例存活，后续工具调用会自动复用已建立的连接。
+        MultiServerMCPClient stores connection config only; it holds no persistent
+        connections. Each get_tools() call opens an ephemeral session that closes
+        automatically after the call completes.
         """
         logger.info("开始初始化 MCP 工具...")
         try:
@@ -49,7 +51,13 @@ class MCPService(BaseService):
                 f"已连接 {len(MCP_CONFIG)} 个服务器"
             )
         except Exception as e:
-            logger.error(f"MCP工具初始化失败: {e}", exc_info=True)
+            # anyio TaskGroup wraps sub-exceptions in an ExceptionGroup.
+            # Unwrap one level to surface the actual root cause in the log line.
+            inner: BaseException = e
+            if hasattr(e, "exceptions") and e.exceptions:  # type: ignore[union-attr]
+                inner = e.exceptions[0]  # type: ignore[union-attr]
+            logger.error("MCP init failed: %s", inner)
+            logger.debug("MCP init full traceback:", exc_info=True)
             self.mcp_tools = []
             self.mcp_client = None
 
@@ -89,15 +97,6 @@ class MCPService(BaseService):
         """
         return self.mcp_client
 
-    def get_mcp_session(self):
-        """
-        获取MCP客户端实例（兼容旧接口）
-
-        Returns:
-            MCP客户端实例
-        """
-        return self.mcp_client
-
     def is_mcp_initialized(self) -> bool:
         """
         检查MCP是否已初始化
@@ -107,8 +106,10 @@ class MCPService(BaseService):
         """
         result = self.mcp_client is not None and self.mcp_tools is not None
         if not result:
-            logger.warning(
-                f"MCP 未初始化: mcp_client={self.mcp_client}, mcp_tools={self.mcp_tools}"
+            logger.debug(
+                "MCP not initialized: client=%s, tools_loaded=%s",
+                self.mcp_client is not None,
+                self.mcp_tools is not None,
             )
         return result
 
@@ -117,8 +118,10 @@ class MCPService(BaseService):
         清理 MCP 资源
 
         在应用关闭时调用。
-        注意：MultiServerMCPClient 没有显式的 close 方法，
-        当 client 对象被销毁时，底层的 stdio 进程会自动终止。
+        MultiServerMCPClient holds no persistent connections (each get_tools() call
+        uses an ephemeral session that is closed automatically). The class has no
+        aclose() method and its __aexit__ raises NotImplementedError. Dropping the
+        reference is therefore the correct and complete cleanup.
         """
         self.mcp_client = None
         self.mcp_tools = None
