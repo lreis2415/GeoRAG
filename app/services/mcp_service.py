@@ -7,56 +7,18 @@ MultiServerMCPClient 内部管理连接复用，保持 client 实例存活即可
 """
 
 import logging
-from datetime import datetime
 from typing import List, Optional
 
-from langchain.tools import tool
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
+from ..utils.config import AppConfig
 from .base_service import BaseService
 
 logger = logging.getLogger(__name__)
 
-# MCP服务配置
-MCP_CONFIG = {
-    # calculator-mcp 也改为 HTTP 传输（可选）
-    # "calculator-mcp": {
-    #     "url": "http://localhost:8001/mcp",
-    #     "transport": "streamable_http",
-    # },
-    # "calculator-mcp": {
-    #     "command": "/opt/homebrew/bin/uv",
-    #     "args": [
-    #         "--directory",
-    #         "/Users/wuchenglong/Documents/LLM/MCP-Geo",
-    #         "run",
-    #         "geo_cal.py",
-    #     ],
-    #     "transport": "stdio",
-    # },
-    "pygeomodels": {
-        "url": "http://localhost:8050/mcp",
-        "transport": "streamable_http",
-    },
-}
-
-
-# Function Call tool 封装示例（实际上本项目没用到，仅供学习参考）
-@tool("get_current_time", return_direct=True)
-def get_current_time():
-    """
-    获取当前时间
-    """
-    # 获取当前日期和时间
-    current_datetime = datetime.now()
-    # 格式化当前日期和时间
-    formatted_time = current_datetime.strftime("%Y-%m-%d %H:%M:%S")
-    # 返回格式化后的当前时间
-    return f"当前时间：{formatted_time}。"
-
-
-# 示例工具列表
-tools = [get_current_time]
+# MCP server configuration is loaded from the MCP_CONFIG env variable (JSON string).
+# See .env.example for the expected format.
+MCP_CONFIG: dict = AppConfig.MCP_CONFIG
 
 
 class MCPService(BaseService):
@@ -66,7 +28,6 @@ class MCPService(BaseService):
         super().__init__()
         self.mcp_tools: Optional[List] = None
         self.mcp_client: Optional[MultiServerMCPClient] = None
-        # 移除 StdioServerParameters，不再需要
 
     async def init_mcp_tools(self):
         """
@@ -89,7 +50,6 @@ class MCPService(BaseService):
             )
         except Exception as e:
             logger.error(f"MCP工具初始化失败: {e}", exc_info=True)
-            self.log_error(f"MCP工具初始化失败: {e}")
             self.mcp_tools = []
             self.mcp_client = None
 
@@ -163,12 +123,3 @@ class MCPService(BaseService):
         self.mcp_client = None
         self.mcp_tools = None
         self.log_info("MCP 资源引用已清理")
-
-    def get_example_tools(self) -> List:
-        """
-        获取示例工具列表（用于测试）
-
-        Returns:
-            示例工具列表
-        """
-        return tools
