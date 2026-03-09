@@ -3,6 +3,7 @@
 管理应用的配置信息和环境变量
 """
 
+import json
 import logging
 import os
 from datetime import datetime
@@ -98,6 +99,10 @@ class AppConfig:
     # 响应状态码
     SUCCESS_CODE = 2000
     ERROR_CODE = 5000
+
+    # MCP server configuration — full config loaded from env as JSON.
+    # Format: '{"server_name": {"url": "...", "transport": "streamable_http"}, ...}'
+    MCP_CONFIG: dict = json.loads(os.getenv("MCP_CONFIG", "{}"))
 
 
 # 全局配置实例
