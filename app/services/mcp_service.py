@@ -8,7 +8,8 @@ are held. Each get_tools() call opens and closes its own ephemeral session.
 """
 
 import logging
-from typing import List, Optional
+from copy import deepcopy
+from typing import Any, Dict, List, Optional
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
@@ -96,6 +97,52 @@ class MCPService(BaseService):
             MCP客户端实例
         """
         return self.mcp_client
+
+    def _build_mcp_config_with_bearer(self, token: str) -> Dict[str, Any]:
+        """
+        基于全局 MCP_CONFIG 构建带 Authorization 请求头的配置。
+
+        注意：为了避免全局污染，这里会深拷贝配置并仅在副本上写入 headers。
+        """
+        config_copy: Dict[str, Any] = deepcopy(MCP_CONFIG)
+        for _, server_cfg in config_copy.items():
+            if isinstance(server_cfg, dict):
+                headers = server_cfg.get("headers")
+                if not isinstance(headers, dict):
+                    headers = {}
+                headers["Authorization"] = f"Bearer {token}"
+                server_cfg["headers"] = headers
+        return config_copy
+
+    async def get_mcp_tools_for_token(self, token: str) -> List:
+        """
+        按请求动态构建 MCP 工具（携带 Bearer Token）。
+
+        该方法用于需要将用户 token 透传到 MCP Server 的场景。
+        不会更新全局缓存的 mcp_client/mcp_tools，避免跨用户 token 污染。
+
+        Args:
+            token: Bearer token（不含 "Bearer " 前缀）
+
+        Returns:
+            按 token 构建得到的工具列表。失败时返回空列表。
+        """
+        if not token:
+            return self.get_mcp_tools() or []
+
+        try:
+            config_with_headers = self._build_mcp_config_with_bearer(token)
+            ephemeral_client = MultiServerMCPClient(config_with_headers)
+            tools = await ephemeral_client.get_tools()
+            self.log_info(f"按请求构建 MCP 工具成功，共 {len(tools)} 个工具")
+            return tools
+        except Exception as e:
+            inner: BaseException = e
+            if hasattr(e, "exceptions") and e.exceptions:  # type: ignore[union-attr]
+                inner = e.exceptions[0]  # type: ignore[union-attr]
+            logger.error("MCP tokenized tools failed: %s", inner)
+            logger.debug("MCP tokenized tools full traceback:", exc_info=True)
+            return []
 
     def is_mcp_initialized(self) -> bool:
         """

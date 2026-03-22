@@ -5,7 +5,8 @@
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.dao.chat_dao import ChatDAO
@@ -34,6 +35,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Optional Bearer auth parser for incoming chat requests.
+# auto_error=False keeps the endpoint backward-compatible for callers without token.
+http_bearer = HTTPBearer(auto_error=False)
+
 
 # 初始化 DAO 实例
 chat_dao = ChatDAO()
@@ -42,6 +47,7 @@ chat_dao = ChatDAO()
 @router.post("/chat", response_model=StandardResponse[ChatResponse], tags=["聊天对话"])
 async def chat_with_agent(
     request: ChatRequest,
+    credentials: HTTPAuthorizationCredentials = Security(http_bearer),
     chat_service: ChatService = Depends(get_chat_service),
     model_service: ModelService = Depends(get_model_service),
     mcp_service: MCPService = Depends(
@@ -89,7 +95,11 @@ async def chat_with_agent(
         # 获取MCP工具（使用依赖注入的服务，已在应用启动时初始化）
         mcp_tools = []
         if mcp_service.is_mcp_initialized():
-            mcp_tools = mcp_service.get_mcp_tools() or []
+            token = credentials.credentials if credentials else None
+            if token:
+                mcp_tools = await mcp_service.get_mcp_tools_for_token(token)
+            else:
+                mcp_tools = mcp_service.get_mcp_tools() or []
             logger.info(f"获取到 {len(mcp_tools)} 个 MCP 工具")
             if mcp_tools:
                 logger.info(f"MCP 工具列表: {[tool.name for tool in mcp_tools]}")
