@@ -5,7 +5,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, Security
+from fastapi import APIRouter, Depends, Query, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -17,7 +17,6 @@ from app.utils.dependencies import (
     get_model_service,
 )
 from app.utils.models import (
-    ChatHistoryRequest,
     ChatHistoryResponse,
     ChatInitResponse,
     ChatRequest,
@@ -119,6 +118,7 @@ async def chat_with_agent(
         # 如果使用记忆功能，保存对话记录到记忆和数据库
         if request.use_memory and session_id:
             chat_dao.save_message(db, session_id, "user", request.query)
+            chat_service.ensure_session_title(session_id, request.query, db)
             chat_service.add_to_memory(session_id, request.query, result["response"])
             # 同时将AI回复写入数据库
             chat_dao.save_message(db, session_id, "assistant", result["response"])
@@ -178,14 +178,13 @@ async def get_chat_sessions(
         # 从数据库获取持久化的会话
         db_sessions = chat_dao.get_all_sessions(db)
 
-        # 合并会话信息并转换为字典格式
-        sessions_dict = {}
+        sessions_list = []
         for session in db_sessions:
-            session_id = session["session_id"]
-            # 使用session_id作为键，session信息作为值
-            sessions_dict[session_id] = session
+            if not session.get("title"):
+                session["title"] = chat_service.default_session_title
+            sessions_list.append(session)
 
-        return success_response(data={"sessions": sessions_dict})
+        return success_response(data={"sessions": sessions_list})
     except Exception as e:
         logger.error(f"获取会话信息失败: {e}")
         return error_response(message=f"无法获取会话信息: {str(e)}", code=5011)
@@ -242,53 +241,68 @@ async def clear_all_sessions(
         return error_response(message=f"无法清空会话: {str(e)}", code=5013)
 
 
-@router.post(
-    "/chat/history",
+@router.get(
+    "/chat/sessions/{session_id}/history",
     response_model=StandardResponse[ChatHistoryResponse],
     tags=["聊天对话"],
 )
-async def get_chat_history(
-    request: ChatHistoryRequest,
+async def get_chat_history_by_session(
+    session_id: str,
     db: Session = Depends(get_db),
-    chat_service: ChatService = Depends(get_chat_service),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
 ):
     """
-    获取会话历史记录
+    获取会话历史记录（推荐 GET 接口）
     """
+    return await _get_chat_history_internal(session_id, db, limit=limit, offset=offset)
+
+
+async def _get_chat_history_internal(
+    session_id: str, db: Session, limit: int = 100, offset: int = 0
+):
+    """Build chat history response payload."""
     try:
-        session_id = request.session_id
         if not session_id:
             raise ValueError("session_id is required")
 
-        # 获取会话信息
-        sessions = chat_dao.get_all_sessions(db)
-        session_info = next(
-            (s for s in sessions if s["session_id"] == session_id), None
-        )
+        session_info = chat_dao.get_session(db, session_id)
 
         if not session_info:
             raise ValueError("Session not found")
 
         created_at = session_info.get("created_at")
-        last_active = session_info.get("last_active", created_at)
+        title = session_info.get("title") or "New Chat"
+        full_history = chat_dao.get_session_history(db, session_id)
+        paged_messages = full_history[offset : offset + limit]
 
-        # 从数据库获取历史记录
-        history = chat_dao.get_session_history(db, session_id)
+        messages = []
+        for msg in paged_messages:
+            message_item = {
+                "message_id": msg.get("message_id"),
+                "role": msg.get("role"),
+                "content": msg.get("content"),
+                "created_at": msg.get("created_at"),
+            }
 
-        # 确保返回所有必需的字段
+            if msg.get("role") == "assistant":
+                message_item["sources"] = []
+                message_item["tool_calls"] = None
+
+            messages.append(message_item)
+
         response_data = {
-            "session_id": session_id,
-            "history": history,
-            "created_at": (
-                created_at.isoformat()
-                if hasattr(created_at, "isoformat")
-                else created_at
-            ),
-            "last_active": (
-                last_active.isoformat()
-                if hasattr(last_active, "isoformat")
-                else last_active
-            ),
+            "session": {
+                "session_id": session_id,
+                "title": title,
+                "created_at": (
+                    created_at.isoformat()
+                    if hasattr(created_at, "isoformat")
+                    else created_at
+                ),
+                "message_count": len(full_history),
+            },
+            "messages": messages,
         }
 
         return success_response(data=response_data)

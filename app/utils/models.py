@@ -69,14 +69,6 @@ class ChatRequest(BaseModel):
     )
 
 
-class ChatHistoryRequest(BaseModel):
-    """聊天历史请求模型"""
-
-    session_id: str = Field(
-        ..., description="会话ID", example="550e8400-e29b-41d4-a716-446655440000"
-    )
-
-
 class HealthResponse(BaseModel):
     """健康检查响应模型"""
 
@@ -94,8 +86,8 @@ class ModelsResponse(BaseModel):
 class SessionsResponse(BaseModel):
     """会话列表响应模型"""
 
-    sessions: Dict[str, Dict[str, Union[str, int]]] = Field(
-        ..., description="会话列表，键为会话ID，值为会话信息"
+    sessions: List[Dict[str, Optional[Union[str, int]]]] = Field(
+        ..., description="会话列表（按创建时间倒序）"
     )
 
 
@@ -114,13 +106,47 @@ class ChatInitResponse(BaseModel):
     session_id: str = Field(..., description="新创建的会话ID")
 
 
+class MessageSource(BaseModel):
+    """消息来源（RAG模式下的知识库来源）"""
+
+    file_name: str = Field(..., description="文件名")
+    file_path: str = Field(..., description="文件路径")
+    content: str = Field(..., description="页面内容摘要")
+
+
+class ToolCall(BaseModel):
+    """工具调用信息"""
+
+    name: Optional[str] = Field(None, description="工具名称")
+    arguments: Optional[str] = Field(None, description="工具参数")
+    result: Optional[str] = Field(None, description="工具结果")
+
+
+class ChatMessageItem(BaseModel):
+    """聊天消息"""
+
+    message_id: str = Field(..., description="消息唯一ID")
+    role: str = Field(..., description="角色：user/assistant/system")
+    content: str = Field(..., description="消息内容")
+    created_at: str = Field(..., description="创建时间（ISO 8601）")
+    sources: Optional[List[MessageSource]] = Field(None, description="知识库来源")
+    tool_calls: Optional[List[ToolCall]] = Field(None, description="工具调用")
+
+
+class ChatSessionInfo(BaseModel):
+    """会话信息"""
+
+    session_id: str = Field(..., description="会话ID")
+    title: str = Field(..., description="会话标题")
+    created_at: str = Field(..., description="会话创建时间（ISO 8601）")
+    message_count: int = Field(..., description="消息总数")
+
+
 class ChatHistoryResponse(BaseModel):
     """聊天历史响应模型"""
 
-    session_id: str = Field(..., description="会话ID")
-    history: List[Dict[str, str]] = Field(..., description="对话历史记录")
-    created_at: str = Field(..., description="会话创建时间")
-    last_active: str = Field(..., description="最后活跃时间")
+    session: ChatSessionInfo = Field(..., description="会话信息")
+    messages: List[ChatMessageItem] = Field(..., description="消息列表（按时间升序）")
 
 
 # ==================== 向后兼容 re-export ====================
