@@ -4,6 +4,7 @@
 """
 
 import os
+import re
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -45,6 +46,8 @@ class ChatService(BaseService):
         self.dao = ChatDAO()
         self._db_session = db_session
         self._database_service = database_service  # 新增：DatabaseService 依赖注入
+        self.default_session_title = "New Chat"
+        self.max_session_title_length = 30
 
     def _get_db(self) -> Session:
         """获取数据库会话"""
@@ -94,7 +97,7 @@ class ChatService(BaseService):
 
             # 确保会话在数据库中存在
             try:
-                self.dao.save_session(db, session_id)
+                self.dao.save_session(db, session_id, title=None)
                 db.commit()
             except Exception as e:
                 db.rollback()
@@ -103,6 +106,38 @@ class ChatService(BaseService):
             self.log_info(f"创建新会话: {session_id}")
 
         return session_id
+
+    def generate_session_title(self, query: str) -> str:
+        """Generate a short title from the first user query."""
+        if not query:
+            return self.default_session_title
+
+        normalized = re.sub(r"\s+", " ", query).strip()
+        if not normalized:
+            return self.default_session_title
+
+        if len(normalized) > self.max_session_title_length:
+            return normalized[: self.max_session_title_length].rstrip()
+
+        return normalized
+
+    def ensure_session_title(
+        self, session_id: str, query: str, db: Optional[Session] = None
+    ) -> str:
+        """Set session title once if it is currently missing."""
+        db = db or self._get_db()
+
+        session_info = self.dao.get_session(db, session_id)
+        if not session_info:
+            return self.default_session_title
+
+        existing_title = (session_info.get("title") or "").strip()
+        if existing_title:
+            return existing_title
+
+        generated_title = self.generate_session_title(query)
+        self.dao.update_session_title(db, session_id, generated_title)
+        return generated_title
 
     def _cleanup_old_sessions(self):
         """清理最老的会话"""
@@ -477,7 +512,7 @@ class ChatService(BaseService):
                     if docs:
                         return "\n\n".join(
                             [
-                                f"【document {i+1}】\n{doc.page_content}"
+                                f"【document {i + 1}】\n{doc.page_content}"
                                 for i, doc in enumerate(docs)
                             ]
                         )

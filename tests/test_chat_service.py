@@ -31,6 +31,8 @@ def mock_dao():
     dao.delete_session = MagicMock(return_value=True)
     dao.clear_all_sessions = MagicMock()
     dao.get_all_sessions = MagicMock(return_value=[])
+    dao.get_session = MagicMock(return_value=None)
+    dao.update_session_title = MagicMock(return_value=True)
     return dao
 
 
@@ -108,7 +110,7 @@ def test_create_session_with_new_id(service, mock_dao, mock_db):
     assert "created_at" in service.chat_sessions[session_id]
     assert "last_active" in service.chat_sessions[session_id]
     assert service.chat_sessions[session_id]["message_count"] == 0
-    mock_dao.save_session.assert_called_once_with(mock_db, session_id)
+    mock_dao.save_session.assert_called_once_with(mock_db, session_id, title=None)
 
 
 def test_create_session_with_existing_id(service, mock_db):
@@ -486,6 +488,57 @@ def test_session_exists_empty_list(service, mock_dao, mock_db):
     result = service.session_exists("test-session", db=mock_db)
 
     assert result is False
+
+
+# ==================== 测试会话标题生成 ====================
+
+
+def test_generate_session_title_normal(service):
+    """测试正常标题生成"""
+    title = service.generate_session_title("请帮我总结一下这篇论文的核心观点")
+    assert title == "请帮我总结一下这篇论文的核心观点"
+
+
+def test_generate_session_title_empty(service):
+    """测试空输入时回退默认标题"""
+    assert service.generate_session_title("") == "New Chat"
+    assert service.generate_session_title("   ") == "New Chat"
+
+
+def test_generate_session_title_with_newline_and_trim(service):
+    """测试换行归一化和长度截断"""
+    long_query = "这是第一行\n这是第二行\n这是第三行并且非常非常长需要被截断"
+    title = service.generate_session_title(long_query)
+    assert "\n" not in title
+    assert len(title) <= service.max_session_title_length
+
+
+def test_ensure_session_title_when_missing(service, mock_dao, mock_db):
+    """测试缺失标题时自动设置"""
+    mock_dao.get_session.return_value = {
+        "session_id": "s1",
+        "title": None,
+        "created_at": "2024-01-01T00:00:00",
+    }
+
+    title = service.ensure_session_title("s1", "你好，帮我写周报", db=mock_db)
+
+    assert title == "你好，帮我写周报"
+    mock_dao.update_session_title.assert_called_once_with(mock_db, "s1", title)
+
+
+def test_ensure_session_title_when_exists(service, mock_dao, mock_db):
+    """测试已有标题时不重复更新"""
+    mock_dao.get_session.return_value = {
+        "session_id": "s1",
+        "title": "已有标题",
+        "created_at": "2024-01-01T00:00:00",
+    }
+
+    title = service.ensure_session_title("s1", "新的问题", db=mock_db)
+
+    assert title == "已有标题"
+    mock_dao.update_session_title.assert_not_called()
 
 
 # ==================== 测试 chat_with_agent ====================

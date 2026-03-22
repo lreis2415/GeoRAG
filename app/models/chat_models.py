@@ -9,6 +9,7 @@ class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
     session_id = Column(String(64), primary_key=True, index=True, comment="会话ID")
+    title = Column(String(200), nullable=True, comment="会话标题")
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
 
 

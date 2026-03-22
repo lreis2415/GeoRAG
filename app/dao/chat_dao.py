@@ -1,7 +1,7 @@
 import logging
 from typing import List, Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -13,27 +13,110 @@ logger = logging.getLogger(__name__)
 class ChatDAO:
     """聊天数据访问对象"""
 
+    _title_column_checked = False
+
+    @classmethod
+    def _ensure_title_column(cls, db: Session) -> None:
+        """Best-effort schema compatibility for `chat_sessions.title`."""
+        if cls._title_column_checked:
+            return
+
+        try:
+            engine = db.get_bind()
+            if engine is None:
+                return
+
+            columns = {
+                col["name"] for col in inspect(engine).get_columns("chat_sessions")
+            }
+            if "title" not in columns:
+                db.execute(
+                    text("ALTER TABLE chat_sessions ADD COLUMN title VARCHAR(200)")
+                )
+                db.commit()
+            cls._title_column_checked = True
+        except Exception:
+            # 对于测试 mock 或非标准数据库，忽略并继续
+            db.rollback()
+
     @staticmethod
-    def save_session(db: Session, session_id: str) -> None:
+    def save_session(db: Session, session_id: str, title: Optional[str] = None) -> None:
         """
         保存会话到数据库
 
         Args:
             db: 数据库会话
             session_id: 会话ID
+            title: 会话标题（可选）
 
         Raises:
             SQLAlchemyError: 数据库操作异常
         """
         try:
-            # 使用 merge 实现 upsert 操作
-            db.merge(ChatSession(session_id=session_id))
+            ChatDAO._ensure_title_column(db)
+            existing_session = db.get(ChatSession, session_id)
+            if existing_session:
+                if title is not None:
+                    existing_session.title = title
+            else:
+                db.add(ChatSession(session_id=session_id, title=title))
             db.commit()
             logger.debug(f"Session saved: {session_id}")
         except SQLAlchemyError as e:
             db.rollback()
             logger.error(f"保存会话到数据库失败: {e}")
             raise
+
+    @staticmethod
+    def get_session(db: Session, session_id: str) -> Optional[dict]:
+        """获取单个会话信息"""
+        try:
+            ChatDAO._ensure_title_column(db)
+            session = (
+                db.query(ChatSession)
+                .filter(ChatSession.session_id == session_id)
+                .first()
+            )
+            if not session:
+                return None
+
+            return {
+                "session_id": session.session_id,
+                "title": session.title,
+                "created_at": (
+                    session.created_at.isoformat() if session.created_at else None
+                ),
+            }
+        except SQLAlchemyError as e:
+            logger.error(f"获取会话失败: {e}")
+            return None
+
+    @staticmethod
+    def update_session_title(db: Session, session_id: str, title: str) -> bool:
+        """
+        更新会话标题
+
+        Args:
+            db: 数据库会话
+            session_id: 会话ID
+            title: 会话标题
+
+        Returns:
+            bool: 是否更新成功
+        """
+        try:
+            ChatDAO._ensure_title_column(db)
+            result = (
+                db.query(ChatSession)
+                .filter(ChatSession.session_id == session_id)
+                .update({"title": title})
+            )
+            db.commit()
+            return result > 0
+        except SQLAlchemyError as e:
+            db.rollback()
+            logger.error(f"更新会话标题失败: {e}")
+            return False
 
     @staticmethod
     def save_message(
@@ -164,17 +247,21 @@ class ChatDAO:
             List[dict]: 会话信息列表，每个会话包含session_id, created_at, message_count
         """
         try:
+            ChatDAO._ensure_title_column(db)
             # 获取所有会话及其消息数量
             sessions = (
                 db.query(
                     ChatSession.session_id,
+                    ChatSession.title,
                     ChatSession.created_at,
                     func.count(ChatMessage.message_id).label("message_count"),
                 )
                 .outerjoin(
                     ChatMessage, ChatSession.session_id == ChatMessage.session_id
                 )
-                .group_by(ChatSession.session_id, ChatSession.created_at)
+                .group_by(
+                    ChatSession.session_id, ChatSession.title, ChatSession.created_at
+                )
                 .order_by(ChatSession.created_at.desc())
                 .all()
             )
@@ -182,6 +269,7 @@ class ChatDAO:
             return [
                 {
                     "session_id": s.session_id,
+                    "title": s.title,
                     "created_at": s.created_at.isoformat() if s.created_at else None,
                     "message_count": s.message_count or 0,
                 }
@@ -226,11 +314,16 @@ class ChatDAO:
             session_id: 会话ID
 
         Returns:
-            List[dict]: 消息列表，每个消息包含role和content
+            List[dict]: 消息列表，包含 message_id/role/content/created_at
         """
         try:
             messages = (
-                db.query(ChatMessage.role, ChatMessage.content, ChatMessage.created_at)
+                db.query(
+                    ChatMessage.message_id,
+                    ChatMessage.role,
+                    ChatMessage.content,
+                    ChatMessage.created_at,
+                )
                 .filter(ChatMessage.session_id == session_id)
                 .order_by(ChatMessage.created_at.asc())
                 .all()
@@ -238,6 +331,7 @@ class ChatDAO:
 
             return [
                 {
+                    "message_id": msg.message_id,
                     "role": msg.role,
                     "content": msg.content,
                     "created_at": (
