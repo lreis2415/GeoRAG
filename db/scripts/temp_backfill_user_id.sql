@@ -10,6 +10,7 @@ DO $$
 DECLARE
     target_user_id CONSTANT TEXT := '54d50aab-f937-4d47-8117-a528ded04663';
     affected_rows BIGINT;
+    metadata_type TEXT;
 BEGIN
     -- Relational Agent records.
     IF to_regclass('public.chat_sessions') IS NOT NULL THEN
@@ -57,7 +58,7 @@ BEGIN
         RAISE NOTICE 'vector_collections updated: % rows', affected_rows;
     END IF;
 
-    -- LangChain PGVector stores ownership inside cmetadata JSONB.
+    -- LangChain PGVector stores ownership inside cmetadata JSON/JSONB.
     IF EXISTS (
         SELECT 1
         FROM information_schema.columns
@@ -65,18 +66,42 @@ BEGIN
           AND table_name = 'langchain_pg_collection'
           AND column_name = 'cmetadata'
     ) THEN
-        EXECUTE format(
-            $sql$
-            UPDATE public.langchain_pg_collection
-            SET cmetadata = jsonb_set(
-                COALESCE(cmetadata, '{}'::jsonb),
-                '{user_id}',
-                to_jsonb(%L::text),
-                true
-            )
-            $sql$,
-            target_user_id
-        );
+        SELECT data_type
+        INTO metadata_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'langchain_pg_collection'
+          AND column_name = 'cmetadata';
+
+        IF metadata_type = 'jsonb' THEN
+            EXECUTE format(
+                $sql$
+                UPDATE public.langchain_pg_collection
+                SET cmetadata = jsonb_set(
+                    COALESCE(cmetadata, '{}'::jsonb),
+                    '{user_id}',
+                    to_jsonb(%L::text),
+                    true
+                )
+                $sql$,
+                target_user_id
+            );
+        ELSIF metadata_type = 'json' THEN
+            EXECUTE format(
+                $sql$
+                UPDATE public.langchain_pg_collection
+                SET cmetadata = (
+                    jsonb_set(
+                        COALESCE(cmetadata::jsonb, '{}'::jsonb),
+                        '{user_id}',
+                        to_jsonb(%L::text),
+                        true
+                    )
+                )::json
+                $sql$,
+                target_user_id
+            );
+        END IF;
         GET DIAGNOSTICS affected_rows = ROW_COUNT;
         RAISE NOTICE 'langchain_pg_collection metadata updated: % rows', affected_rows;
     END IF;
@@ -88,18 +113,42 @@ BEGIN
           AND table_name = 'langchain_pg_embedding'
           AND column_name = 'cmetadata'
     ) THEN
-        EXECUTE format(
-            $sql$
-            UPDATE public.langchain_pg_embedding
-            SET cmetadata = jsonb_set(
-                COALESCE(cmetadata, '{}'::jsonb),
-                '{user_id}',
-                to_jsonb(%L::text),
-                true
-            )
-            $sql$,
-            target_user_id
-        );
+        SELECT data_type
+        INTO metadata_type
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'langchain_pg_embedding'
+          AND column_name = 'cmetadata';
+
+        IF metadata_type = 'jsonb' THEN
+            EXECUTE format(
+                $sql$
+                UPDATE public.langchain_pg_embedding
+                SET cmetadata = jsonb_set(
+                    COALESCE(cmetadata, '{}'::jsonb),
+                    '{user_id}',
+                    to_jsonb(%L::text),
+                    true
+                )
+                $sql$,
+                target_user_id
+            );
+        ELSIF metadata_type = 'json' THEN
+            EXECUTE format(
+                $sql$
+                UPDATE public.langchain_pg_embedding
+                SET cmetadata = (
+                    jsonb_set(
+                        COALESCE(cmetadata::jsonb, '{}'::jsonb),
+                        '{user_id}',
+                        to_jsonb(%L::text),
+                        true
+                    )
+                )::json
+                $sql$,
+                target_user_id
+            );
+        END IF;
         GET DIAGNOSTICS affected_rows = ROW_COUNT;
         RAISE NOTICE 'langchain_pg_embedding metadata updated: % rows', affected_rows;
     END IF;
@@ -107,4 +156,3 @@ END
 $$;
 
 COMMIT;
-
