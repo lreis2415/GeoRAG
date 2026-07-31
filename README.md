@@ -40,6 +40,12 @@ export DB_URL=postgresql://user:password@host:port/database
 export USE_PGVECTOR=true  # Use Pgvector (recommended)
 # export USE_PGVECTOR=false  # Use ChromaDB
 export DEFAULT_EMBEDDING_MODEL=text-embedding-v4
+export JWT_PUBLIC_KEY_PATH=.secrets/jwt/public.pem
+export AUTH_ENABLED=true
+
+# Local debugging only: bypass JWT and use a fixed synthetic user identity.
+# export AUTH_ENABLED=false
+# export AUTH_DEBUG_USER_ID=local-debug-user
 ```
 
 ### Start Database
@@ -84,6 +90,30 @@ After the service starts:
 - API Docs: http://0.0.0.0:7512/docs
 - Health Check: http://0.0.0.0:7512/llm/
 
+### Local Debug Authentication
+
+Authentication is enabled by default. Protected endpoints require a Java-issued
+RS256 JWT with a valid `sub` and `exp` claim.
+
+For local debugging, authentication can be disabled through environment
+variables:
+
+```bash
+export AUTH_ENABLED=false
+export AUTH_DEBUG_USER_ID=local-debug-user
+python main.py
+```
+
+When `AUTH_ENABLED=false`, the service does not require an `Authorization`
+header or verify a JWT. It creates a synthetic debug identity and passes
+`AUTH_DEBUG_USER_ID` to all user-scoped queries. The value is only a stable
+string; it does not need to exist in the Java user database.
+
+To access data that was previously assigned to a specific user ID, set
+`AUTH_DEBUG_USER_ID` to that exact value. Restore `AUTH_ENABLED=true` after
+debugging. Never disable authentication in production or on a publicly
+reachable service.
+
 ## Usage
 
 ### Document Management
@@ -123,6 +153,9 @@ After the service starts:
 | `DB_URL` | PostgreSQL database connection string | Yes (Pgvector) |
 | `USE_PGVECTOR` | Vector database backend selection (true=pgvector, false=chromadb) | No |
 | `DEFAULT_EMBEDDING_MODEL` | Default embedding model | No |
+| `JWT_PUBLIC_KEY_PATH` | Path to the Java JWT RSA public key | Yes when authentication is enabled |
+| `AUTH_ENABLED` | Enable JWT authentication (default: true) | No |
+| `AUTH_DEBUG_USER_ID` | Synthetic user ID used when `AUTH_ENABLED=false` | No |
 
 ### Model Configuration (models.yaml)
 
