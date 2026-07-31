@@ -14,6 +14,17 @@ ALTER TABLE IF EXISTS chat_runs
 ALTER TABLE IF EXISTS tool_runs
     ADD COLUMN IF NOT EXISTS user_id TEXT;
 
+-- Some existing Docker volumes predate the optional vector_collections table.
+-- Create it here so this migration remains safe on those databases.
+CREATE TABLE IF NOT EXISTS vector_collections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT,
+    name TEXT UNIQUE NOT NULL,
+    cmetadata JSONB,
+    "uuid" UUID UNIQUE DEFAULT gen_random_uuid(),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 ALTER TABLE IF EXISTS vector_collections
     ADD COLUMN IF NOT EXISTS user_id TEXT;
 
