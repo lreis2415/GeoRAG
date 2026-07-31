@@ -3,11 +3,12 @@
 负责聊天会话管理和对话记忆功能
 """
 
+import asyncio
 import os
 import re
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
@@ -49,6 +50,11 @@ class ChatService(BaseService):
         self.default_session_title = "New Chat"
         self.max_session_title_length = 30
 
+    @staticmethod
+    def _session_key(user_id: Optional[str], session_id: str):
+        """Keep in-memory conversation state isolated by authenticated user."""
+        return user_id, session_id
+
     def _get_db(self) -> Session:
         """获取数据库会话"""
         if self._db_session:
@@ -59,7 +65,10 @@ class ChatService(BaseService):
         return SessionLocal()
 
     def create_session(
-        self, session_id: str = None, db: Optional[Session] = None
+        self,
+        session_id: str = None,
+        db: Optional[Session] = None,
+        user_id: Optional[str] = None,
     ) -> str:
         """
         创建或获取会话
@@ -76,7 +85,8 @@ class ChatService(BaseService):
         if session_id is None:
             session_id = str(uuid.uuid4())
 
-        if session_id not in self.chat_sessions:
+        session_key = self._session_key(user_id, session_id)
+        if session_key not in self.chat_sessions:
             # 检查会话数量限制
             if len(self.chat_sessions) >= self.max_sessions:
                 self._cleanup_old_sessions()
@@ -88,7 +98,7 @@ class ChatService(BaseService):
                 max_token_limit=4000,
             )
 
-            self.chat_sessions[session_id] = {
+            self.chat_sessions[session_key] = {
                 "memory": memory,
                 "created_at": datetime.now(),
                 "last_active": datetime.now(),
@@ -97,7 +107,7 @@ class ChatService(BaseService):
 
             # 确保会话在数据库中存在
             try:
-                self.dao.save_session(db, session_id, title=None)
+                self.dao.save_session(db, session_id, title=None, user_id=user_id)
                 db.commit()
             except Exception as e:
                 db.rollback()
@@ -122,12 +132,16 @@ class ChatService(BaseService):
         return normalized
 
     def ensure_session_title(
-        self, session_id: str, query: str, db: Optional[Session] = None
+        self,
+        session_id: str,
+        query: str,
+        db: Optional[Session] = None,
+        user_id: Optional[str] = None,
     ) -> str:
         """Set session title once if it is currently missing."""
         db = db or self._get_db()
 
-        session_info = self.dao.get_session(db, session_id)
+        session_info = self.dao.get_session(db, session_id, user_id=user_id)
         if not session_info:
             return self.default_session_title
 
@@ -136,7 +150,9 @@ class ChatService(BaseService):
             return existing_title
 
         generated_title = self.generate_session_title(query)
-        self.dao.update_session_title(db, session_id, generated_title)
+        self.dao.update_session_title(
+            db, session_id, generated_title, user_id=user_id
+        )
         return generated_title
 
     def _cleanup_old_sessions(self):
@@ -155,15 +171,18 @@ class ChatService(BaseService):
             del self.chat_sessions[session_id]
             self.log_info(f"清理旧会话: {session_id}")
 
-    def update_session_activity(self, session_id: str):
+    def update_session_activity(
+        self, session_id: str, user_id: Optional[str] = None
+    ):
         """
         更新会话活跃时间
 
         Args:
             session_id: 会话ID
         """
-        if session_id in self.chat_sessions:
-            self.chat_sessions[session_id]["last_active"] = datetime.now()
+        session_key = self._session_key(user_id, session_id)
+        if session_key in self.chat_sessions:
+            self.chat_sessions[session_key]["last_active"] = datetime.now()
 
     def add_to_memory(
         self,
@@ -171,6 +190,7 @@ class ChatService(BaseService):
         human_message: str,
         ai_message: str,
         db: Optional[Session] = None,
+        user_id: Optional[str] = None,
     ):
         """
         添加对话到记忆中
@@ -184,11 +204,12 @@ class ChatService(BaseService):
         db = db or self._get_db()
 
         # 确保会话存在
-        if session_id not in self.chat_sessions:
-            self.create_session(session_id, db)
+        session_key = self._session_key(user_id, session_id)
+        if session_key not in self.chat_sessions:
+            self.create_session(session_id, db, user_id=user_id)
 
-        if session_id in self.chat_sessions:
-            session = self.chat_sessions[session_id]
+        if session_key in self.chat_sessions:
+            session = self.chat_sessions[session_key]
             memory = session["memory"]
 
             try:
@@ -214,7 +235,10 @@ class ChatService(BaseService):
                 self.log_error(f"保存消息失败: {e}")
 
     def get_conversation_history(
-        self, session_id: str, db: Optional[Session] = None
+        self,
+        session_id: str,
+        db: Optional[Session] = None,
+        user_id: Optional[str] = None,
     ) -> List[BaseMessage]:
         """
         获取会话历史
@@ -230,7 +254,9 @@ class ChatService(BaseService):
 
         try:
             history = []
-            db_messages = self.dao.get_session_history(db, session_id)
+            db_messages = self.dao.get_session_history(
+                db, session_id, user_id=user_id
+            )
 
             for msg in db_messages:
                 role = msg.get("role", "").lower()
@@ -245,7 +271,7 @@ class ChatService(BaseService):
 
             # 如果从数据库加载到消息，更新内存缓存
             if history:
-                self._load_session_from_db(session_id, history, db)
+                self._load_session_from_db(user_id, session_id, history, db)
 
             return history
 
@@ -254,7 +280,11 @@ class ChatService(BaseService):
             return []
 
     def _load_session_from_db(
-        self, session_id: str, messages: List[BaseMessage], db: Session
+        self,
+        user_id: Optional[str],
+        session_id: str,
+        messages: List[BaseMessage],
+        db: Session,
     ):
         """从数据库加载会话到内存"""
         memory = ConversationBufferMemory(
@@ -273,7 +303,7 @@ class ChatService(BaseService):
                 memory.save_context({"system": msg.content}, {"output": ""})
 
         # 更新内存中的会话
-        self.chat_sessions[session_id] = {
+        self.chat_sessions[self._session_key(user_id, session_id)] = {
             "memory": memory,
             "created_at": datetime.now(),  # 使用当前时间，或可以从数据库获取
             "last_active": datetime.now(),
@@ -281,7 +311,10 @@ class ChatService(BaseService):
         }
 
     def delete_chat_session(
-        self, session_id: str, db: Optional[Session] = None
+        self,
+        session_id: str,
+        db: Optional[Session] = None,
+        user_id: Optional[str] = None,
     ) -> bool:
         """
         删除指定会话
@@ -298,10 +331,11 @@ class ChatService(BaseService):
 
         # 从数据库中删除
         try:
-            db_deleted = self.dao.delete_session(db, session_id)
+            db_deleted = self.dao.delete_session(db, session_id, user_id=user_id)
             if db_deleted:
                 db.commit()
                 deleted = True
+                self.chat_sessions.pop(self._session_key(user_id, session_id), None)
                 self.log_info(f"从数据库中删除会话: {session_id}")
         except Exception as e:
             db.rollback()
@@ -312,7 +346,9 @@ class ChatService(BaseService):
 
         return deleted
 
-    def clear_all_sessions(self, db: Optional[Session] = None):
+    def clear_all_sessions(
+        self, db: Optional[Session] = None, user_id: Optional[str] = None
+    ):
         """
         清空所有会话
 
@@ -323,14 +359,25 @@ class ChatService(BaseService):
 
         # 清空数据库中的会话
         try:
-            self.dao.clear_all_sessions(db)
+            self.dao.clear_all_sessions(db, user_id=user_id)
             db.commit()
+            if user_id is None:
+                self.chat_sessions.clear()
+            else:
+                for session_key in list(self.chat_sessions):
+                    if session_key[0] == user_id:
+                        self.chat_sessions.pop(session_key, None)
             self.log_info("清空数据库中所有会话")
         except Exception as e:
             db.rollback()
             self.log_error(f"清空数据库会话失败: {e}")
 
-    def get_chat_history(self, session_id: str, db: Optional[Session] = None) -> Dict:
+    def get_chat_history(
+        self,
+        session_id: str,
+        db: Optional[Session] = None,
+        user_id: Optional[str] = None,
+    ) -> Dict:
         """
         获取会话历史记录
 
@@ -350,8 +397,8 @@ class ChatService(BaseService):
             raise ValueError("session_id is required")
 
         # 获取历史记录
-        messages = self.get_conversation_history(session_id, db)
-        if not messages and not self.session_exists(session_id, db):
+        messages = self.get_conversation_history(session_id, db, user_id=user_id)
+        if not messages and not self.session_exists(session_id, db, user_id=user_id):
             raise ValueError("Session not found")
 
         # 格式化历史记录
@@ -369,14 +416,15 @@ class ChatService(BaseService):
         last_active = None
         message_count = len(formatted_history)
 
-        if session_id in self.chat_sessions:
-            session = self.chat_sessions[session_id]
+        session_key = self._session_key(user_id, session_id)
+        if session_key in self.chat_sessions:
+            session = self.chat_sessions[session_key]
             created_at = session["created_at"].isoformat()
             last_active = session["last_active"].isoformat()
         else:
             # 尝试从数据库获取元数据
             try:
-                sessions = self.dao.get_all_sessions(db)
+                sessions = self.dao.get_all_sessions(db, user_id=user_id)
                 for s in sessions:
                     if s["session_id"] == session_id:
                         created_at = s.get("created_at")
@@ -395,7 +443,12 @@ class ChatService(BaseService):
             "last_active": last_active or datetime.now().isoformat(),
         }
 
-    def session_exists(self, session_id: str, db: Optional[Session] = None) -> bool:
+    def session_exists(
+        self,
+        session_id: str,
+        db: Optional[Session] = None,
+        user_id: Optional[str] = None,
+    ) -> bool:
         """
         检查会话是否存在
 
@@ -410,7 +463,7 @@ class ChatService(BaseService):
 
         # 检查数据库中是否存在
         try:
-            sessions = self.dao.get_all_sessions(db)
+            sessions = self.dao.get_all_sessions(db, user_id=user_id)
             return any(s["session_id"] == session_id for s in sessions)
         except Exception as e:
             self.log_error(f"检查会话存在性失败: {e}")
@@ -454,6 +507,11 @@ class ChatService(BaseService):
         history: Optional[List] = None,
         db_name: Optional[str] = None,
         mcp_tools: Optional[List] = None,
+        request_id: Optional[str] = None,
+        db: Optional[Session] = None,
+        tool_db_factory: Optional[Callable[[], Session]] = None,
+        timeout_seconds: Optional[float] = None,
+        user_id: Optional[str] = None,
     ) -> Dict:
         """
         智能对话接口 - 支持记忆、向量数据库 RAG 和 MCP 工具
@@ -494,7 +552,9 @@ class ChatService(BaseService):
                 if not self._database_service:
                     raise ValueError("DatabaseService 未初始化，无法使用向量数据库")
 
-                vector_db = self._database_service.get_vector_db(db_name)
+                vector_db = self._database_service.get_vector_db(
+                    db_name, user_id=user_id
+                )
                 if not vector_db:
                     raise ValueError(f"知识库 '{db_name}' 未找到")
 

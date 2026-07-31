@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import FileResponse
 
+from app.auth.dependencies import CurrentUser, get_current_user
 from app.models.knowledge_models import (
     KnowledgeAskRequest,
     KnowledgeBaseCreateResponse,
@@ -42,6 +43,7 @@ router = APIRouter()
     summary="获取所有知识库列表",
 )
 async def get_knowledge_bases(
+    current_user: CurrentUser = Depends(get_current_user),
     database_service: DatabaseService = Depends(get_database_service),
 ) -> StandardResponse[KnowledgeBaseListResponse]:
     """
@@ -53,7 +55,7 @@ async def get_knowledge_bases(
     - `description`：可选描述
     """
     try:
-        raw = database_service.get_databases()
+        raw = database_service.get_databases(user_id=current_user.user_id)
         data = KnowledgeBaseListResponse(
             databases=raw.get("databases", []),
             total_count=len(raw.get("databases", [])),
@@ -71,6 +73,7 @@ async def get_knowledge_bases(
 )
 async def get_knowledge_base_detail(
     db_name: str,
+    current_user: CurrentUser = Depends(get_current_user),
     database_service: DatabaseService = Depends(get_database_service),
 ) -> StandardResponse[KnowledgeBaseInfo]:
     """
@@ -78,7 +81,9 @@ async def get_knowledge_base_detail(
     若知识库不存在，返回 `code=4004`。
     """
     try:
-        info = database_service.get_knowledge_base_info(db_name)
+        info = database_service.get_knowledge_base_info(
+            db_name, user_id=current_user.user_id
+        )
         if not info:
             return error_response(message=f"知识库 '{db_name}' 未找到", code=4004)
         return success_response(data=info)
@@ -98,6 +103,7 @@ async def create_knowledge_base(
     files: list[UploadFile] | None = File(
         None, description="可选：创建时同步导入的文件（csv/json/txt）"
     ),
+    current_user: CurrentUser = Depends(get_current_user),
     database_service: DatabaseService = Depends(get_database_service),
     model_service: ModelService = Depends(get_model_service),
 ) -> StandardResponse[KnowledgeBaseCreateResponse]:
@@ -118,7 +124,9 @@ async def create_knowledge_base(
         if not model_service.validate_embedding_model(model_name):
             return error_response(message=f"嵌入模型 '{model_name}' 不可用", code=4000)
 
-        result = database_service.create_database(model_name, db_name, files)
+        result = database_service.create_database(
+            model_name, db_name, files, user_id=current_user.user_id
+        )
         return success_response(data=result, message="知识库创建成功")
     except ValueError as e:
         return error_response(message=str(e), code=4000)
@@ -134,6 +142,7 @@ async def create_knowledge_base(
 )
 async def delete_knowledge_base(
     db_name: str,
+    current_user: CurrentUser = Depends(get_current_user),
     database_service: DatabaseService = Depends(get_database_service),
 ) -> StandardResponse[Dict[str, str]]:
     """
@@ -144,7 +153,9 @@ async def delete_knowledge_base(
     - 若知识库不存在，返回 `code=4004`。
     """
     try:
-        result = database_service.delete_database(db_name)
+        result = database_service.delete_database(
+            db_name, user_id=current_user.user_id
+        )
         return success_response(data=result, message="知识库删除成功")
     except ValueError as e:
         return error_response(message=str(e), code=4004)
@@ -161,6 +172,7 @@ async def delete_knowledge_base(
 async def update_knowledge_base(
     db_name: str,
     body: KnowledgeBaseUpdateRequest,
+    current_user: CurrentUser = Depends(get_current_user),
     database_service: DatabaseService = Depends(get_database_service),
 ) -> StandardResponse[KnowledgeBaseInfo]:
     """
@@ -174,6 +186,7 @@ async def update_knowledge_base(
             db_name,
             new_name=body.name,
             new_description=body.description,
+            user_id=current_user.user_id,
         )
         return success_response(data=updated, message="知识库元数据已更新")
     except ValueError as e:
@@ -191,6 +204,7 @@ async def update_knowledge_base(
 async def add_files_to_knowledge_base(
     db_name: str,
     files: list[UploadFile] = File(..., description="要追加的文件列表（csv/json/txt）"),
+    current_user: CurrentUser = Depends(get_current_user),
     database_service: DatabaseService = Depends(get_database_service),
 ) -> StandardResponse[KnowledgeBaseCreateResponse]:
     """
@@ -206,7 +220,9 @@ async def add_files_to_knowledge_base(
       `http://localhost:7512/llm/v1/knowledge/bases/my_kb/files`
     """
     try:
-        result = database_service.add_files_to_database(db_name, files)
+        result = database_service.add_files_to_database(
+            db_name, files, user_id=current_user.user_id
+        )
         return success_response(data=result, message="文件添加成功")
     except ValueError as e:
         return error_response(message=str(e), code=4000)
@@ -222,6 +238,7 @@ async def add_files_to_knowledge_base(
 )
 async def get_knowledge_base_files(
     db_name: str,
+    current_user: CurrentUser = Depends(get_current_user),
     database_service: DatabaseService = Depends(get_database_service),
 ) -> StandardResponse[KnowledgeBaseFilesResponse]:
     """
@@ -230,11 +247,15 @@ async def get_knowledge_base_files(
     - 若知识库不存在，返回 `code=4004`。
     """
     try:
-        info = database_service.get_knowledge_base_info(db_name)
+        info = database_service.get_knowledge_base_info(
+            db_name, user_id=current_user.user_id
+        )
         if not info:
             return error_response(message=f"知识库 '{db_name}' 未找到", code=4004)
 
-        files = database_service.get_knowledge_base_files(db_name)
+        files = database_service.get_knowledge_base_files(
+            db_name, user_id=current_user.user_id
+        )
         data = KnowledgeBaseFilesResponse(
             db_name=db_name,
             db_id=info.get("id"),
@@ -258,6 +279,7 @@ async def get_knowledge_base_files(
     summary="列出 documents 目录下的所有文件",
 )
 async def list_knowledge_files(
+    current_user: CurrentUser = Depends(get_current_user),
     document_service: DocumentService = Depends(get_document_service),
 ) -> StandardResponse[Dict[str, List[str]]]:
     """
@@ -265,7 +287,7 @@ async def list_knowledge_files(
     格式为 `{"documents": ["file1.txt", "file2.csv", ...]}`。
     """
     try:
-        documents = document_service.get_documents()
+        documents = document_service.get_documents(current_user.user_id)
         return success_response(data=documents)
     except Exception:
         return error_response(message="无法列出文档", code=5005)
@@ -283,6 +305,7 @@ async def list_knowledge_files(
 )
 async def download_knowledge_file(
     filename: str,
+    current_user: CurrentUser = Depends(get_current_user),
     document_service: DocumentService = Depends(get_document_service),
 ):
     """
@@ -290,7 +313,7 @@ async def download_knowledge_file(
     若文件不存在，返回标准错误响应（`code=4004`，HTTP 200）。
     """
     try:
-        file_path = document_service.download_document(filename)
+        file_path = document_service.download_document(filename, current_user.user_id)
         return FileResponse(file_path, filename=filename)
     except ValueError as e:
         return error_response(message=str(e), code=4004)
@@ -308,6 +331,7 @@ async def download_knowledge_file(
 )
 async def delete_knowledge_file(
     filename: str,
+    current_user: CurrentUser = Depends(get_current_user),
     document_service: DocumentService = Depends(get_document_service),
 ) -> StandardResponse[Dict[str, str]]:
     """
@@ -315,7 +339,7 @@ async def delete_knowledge_file(
     若文件不存在，返回 `code=4004`。
     """
     try:
-        result = document_service.delete_document(filename)
+        result = document_service.delete_document(filename, current_user.user_id)
         return success_response(data=result, message="文档删除成功")
     except ValueError as e:
         return error_response(message=str(e), code=4004)
@@ -334,6 +358,7 @@ async def delete_knowledge_file(
 )
 async def ask_knowledge_base(
     request: KnowledgeAskRequest,
+    current_user: CurrentUser = Depends(get_current_user),
     database_service: DatabaseService = Depends(get_database_service),
     model_service: ModelService = Depends(get_model_service),
     rag_service: RAGService = Depends(get_rag_service),
@@ -360,7 +385,9 @@ async def ask_knowledge_base(
                 message=f"聊天模型 '{chat_model_name}' 不可用", code=4000
             )
 
-        vector_db = database_service.get_vector_db(request.db_name)
+        vector_db = database_service.get_vector_db(
+            request.db_name, user_id=current_user.user_id
+        )
         if not vector_db:
             return error_response(
                 message=f"知识库 '{request.db_name}' 未找到", code=4004

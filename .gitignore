@@ -12,6 +12,7 @@
 
 # 忽略配置变量
 *.env
+.secrets/
 .clinerules
 
 # 忽略对话缓存文件

@@ -4,6 +4,7 @@
 """
 
 import os
+import hashlib
 from typing import Dict, List
 
 from .base_service import BaseService
@@ -25,7 +26,18 @@ class DocumentService(BaseService):
         os.makedirs(self.upload_folder, exist_ok=True)
         self.log_info(f"文档上传目录: {self.upload_folder}")
 
-    def get_documents(self) -> Dict[str, List[str]]:
+    def _user_folder(self, user_id: str) -> str:
+        user_hash = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
+        folder = os.path.join(self.upload_folder, user_hash)
+        os.makedirs(folder, exist_ok=True)
+        return folder
+
+    def _user_file_path(self, filename: str, user_id: str) -> str:
+        if not filename or filename != os.path.basename(filename):
+            raise ValueError("Invalid document filename")
+        return os.path.join(self._user_folder(user_id), filename)
+
+    def get_documents(self, user_id: str) -> Dict[str, List[str]]:
         """
         获取documents目录下的所有文件列表
 
@@ -33,14 +45,15 @@ class DocumentService(BaseService):
             文件列表字典
         """
         try:
-            if not os.path.exists(self.upload_folder):
+            upload_folder = self._user_folder(user_id)
+            if not os.path.exists(upload_folder):
                 self.log_warning("上传目录不存在")
                 return {"documents": []}
 
             documents = [
                 f
-                for f in os.listdir(self.upload_folder)
-                if os.path.isfile(os.path.join(self.upload_folder, f))
+                for f in os.listdir(upload_folder)
+                if os.path.isfile(os.path.join(upload_folder, f))
             ]
 
             self.log_info(f"找到 {len(documents)} 个文档")
@@ -49,7 +62,7 @@ class DocumentService(BaseService):
             self.log_error(f"获取文档列表失败: {e}")
             return {"documents": []}
 
-    def download_document(self, filename: str) -> str:
+    def download_document(self, filename: str, user_id: str) -> str:
         """
         获取文档下载路径
 
@@ -62,7 +75,7 @@ class DocumentService(BaseService):
         Raises:
             ValueError: 文件不存在
         """
-        file_path = os.path.join(self.upload_folder, filename)
+        file_path = self._user_file_path(filename, user_id)
 
         if not os.path.exists(file_path):
             self.log_warning(f"文件不存在: {filename}")
@@ -71,7 +84,7 @@ class DocumentService(BaseService):
         self.log_info(f"准备下载文件: {filename}")
         return file_path
 
-    def delete_document(self, filename: str) -> Dict[str, str]:
+    def delete_document(self, filename: str, user_id: str) -> Dict[str, str]:
         """
         删除指定文档
 
@@ -84,7 +97,7 @@ class DocumentService(BaseService):
         Raises:
             ValueError: 文件不存在
         """
-        file_path = os.path.join(self.upload_folder, filename)
+        file_path = self._user_file_path(filename, user_id)
 
         if not os.path.exists(file_path):
             self.log_warning(f"要删除的文件不存在: {filename}")
@@ -107,7 +120,7 @@ class DocumentService(BaseService):
         """
         return self.upload_folder
 
-    def file_exists(self, filename: str) -> bool:
+    def file_exists(self, filename: str, user_id: str) -> bool:
         """
         检查文件是否存在
 
@@ -117,5 +130,5 @@ class DocumentService(BaseService):
         Returns:
             文件是否存在
         """
-        file_path = os.path.join(self.upload_folder, filename)
+        file_path = self._user_file_path(filename, user_id)
         return os.path.exists(file_path)

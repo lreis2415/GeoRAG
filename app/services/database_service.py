@@ -17,6 +17,7 @@ from app.dao.DataBase import (
     get_all_databases,
     get_database_files,
     get_database_info,
+    get_scoped_db_name,
     get_persist_directory,
     save_uploaded_file,
 )
@@ -35,6 +36,10 @@ class DatabaseService(BaseService):
         self.vector_dbs = {}  # 存储已加载的向量数据库
         self.allowed_extensions = {"csv", "json", "txt"}
 
+    @staticmethod
+    def _cache_key(user_id: Optional[str], db_name: str):
+        return user_id, db_name
+
     def allowed_file(self, filename: str) -> bool:
         """
         检查文件是否允许上传
@@ -50,7 +55,7 @@ class DatabaseService(BaseService):
             and filename.rsplit(".", 1)[1].lower() in self.allowed_extensions
         )
 
-    def get_databases(self) -> Dict[str, List[Dict]]:
+    def get_databases(self, user_id: Optional[str] = None) -> Dict[str, List[Dict]]:
         """
         获取所有知识库列表
 
@@ -58,14 +63,16 @@ class DatabaseService(BaseService):
             知识库列表字典，包含详细信息
         """
         try:
-            databases = get_all_databases()
+            databases = get_all_databases(user_id=user_id)
             self.log_info(f"获取到 {len(databases)} 个数据库")
             return {"databases": databases}
         except Exception as e:
             self.log_error(f"获取数据库列表失败: {e}")
             return {"databases": []}
 
-    def get_knowledge_base_info(self, db_name: str) -> Optional[Dict]:
+    def get_knowledge_base_info(
+        self, db_name: str, user_id: Optional[str] = None
+    ) -> Optional[Dict]:
         """
         获取单个知识库详细信息
 
@@ -76,7 +83,7 @@ class DatabaseService(BaseService):
             知识库信息字典，不存在返回 None
         """
         try:
-            info = get_database_info(db_name)
+            info = get_database_info(db_name, user_id=user_id)
             if info:
                 self.log_info(f"获取到知识库 {db_name} 的信息")
             else:
@@ -86,7 +93,9 @@ class DatabaseService(BaseService):
             self.log_error(f"获取知识库信息失败: {e}")
             return None
 
-    def get_knowledge_base_files(self, db_name: str) -> List[Dict]:
+    def get_knowledge_base_files(
+        self, db_name: str, user_id: Optional[str] = None
+    ) -> List[Dict]:
         """
         获取知识库关联的文件列表
 
@@ -97,7 +106,7 @@ class DatabaseService(BaseService):
             文件信息列表
         """
         try:
-            files = get_database_files(db_name)
+            files = get_database_files(db_name, user_id=user_id)
             self.log_info(f"获取到知识库 {db_name} 的 {len(files)} 个文件")
             return files
         except Exception as e:
@@ -105,7 +114,11 @@ class DatabaseService(BaseService):
             return []
 
     def create_database(
-        self, model_name: str, db_name: str, files=None
+        self,
+        model_name: str,
+        db_name: str,
+        files=None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         创建向量数据库
@@ -138,19 +151,21 @@ class DatabaseService(BaseService):
                     unique_filename = f"{uuid.uuid4().hex}_{filename}"
                     # FastAPI UploadFile.read 是异步协程，这里统一使用底层 file 对象
                     real_file = getattr(file, "file", file)
-                    file_path = save_uploaded_file(real_file, unique_filename)
+                    file_path = save_uploaded_file(
+                        real_file, unique_filename, user_id=user_id
+                    )
                     file_paths.append(file_path)
                     self.log_info(f"保存文件: {unique_filename}")
 
         try:
             # 创建数据库
-            self.vector_dbs[db_name] = create_db(  # noqa: E501
-                model_name, db_name, file_paths
+            self.vector_dbs[self._cache_key(user_id, db_name)] = create_db(  # noqa: E501
+                model_name, db_name, file_paths, user_id=user_id
             )
             self.log_info(f"成功创建数据库: {db_name}")
 
             # 获取创建后的知识库信息
-            db_info = get_database_info(db_name)
+            db_info = get_database_info(db_name, user_id=user_id)
 
             return {
                 "id": db_info.get("id") if db_info else None,
@@ -167,7 +182,9 @@ class DatabaseService(BaseService):
             self.log_error(f"创建数据库失败: {e}")
             raise
 
-    def add_files_to_database(self, db_name: str, files) -> Dict[str, Any]:
+    def add_files_to_database(
+        self, db_name: str, files, user_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         向已有知识库添加新文件
 
@@ -185,7 +202,10 @@ class DatabaseService(BaseService):
             raise ValueError("db_name is required")
 
         # 存在性检查：内存缓存命中视为已知存在，否则查持久化存储
-        if db_name not in self.vector_dbs and get_database_info(db_name) is None:
+        cache_key = self._cache_key(user_id, db_name)
+        if cache_key not in self.vector_dbs and get_database_info(
+            db_name, user_id=user_id
+        ) is None:
             raise ValueError(f"Database '{db_name}' not found")
 
         # 处理上传的文件
@@ -196,20 +216,22 @@ class DatabaseService(BaseService):
                     filename = secure_filename(file.filename)
                     unique_filename = f"{uuid.uuid4().hex}_{filename}"
                     real_file = getattr(file, "file", file)
-                    file_path = save_uploaded_file(real_file, unique_filename)
+                    file_path = save_uploaded_file(
+                        real_file, unique_filename, user_id=user_id
+                    )
                     file_paths.append(file_path)
                     self.log_info(f"添加文件: {unique_filename}")
 
         try:
             # 获取（或加载）向量数据库实例
-            vector_db = self.get_vector_db(db_name)
+            vector_db = self.get_vector_db(db_name, user_id=user_id)
             if vector_db is None:
                 raise ValueError(f"无法加载数据库 '{db_name}'")
 
             vector_db.add_files(file_paths)
             self.log_info(f"成功向数据库 {db_name} 添加 {len(file_paths)} 个文件")
 
-            db_info = get_database_info(db_name)
+            db_info = get_database_info(db_name, user_id=user_id)
             return {
                 "id": (db_info or {}).get("id"),
                 "message": f"Files added to database '{db_name}' successfully",
@@ -227,7 +249,9 @@ class DatabaseService(BaseService):
             self.log_error(f"添加文件到数据库失败: {e}")
             raise
 
-    def delete_database(self, db_name: str) -> Dict[str, str]:
+    def delete_database(
+        self, db_name: str, user_id: Optional[str] = None
+    ) -> Dict[str, str]:
         """
         删除指定知识库
 
@@ -241,16 +265,15 @@ class DatabaseService(BaseService):
             ValueError: 数据库不存在
         """
         # 先做存在性检查，不存在提前报错
-        if get_database_info(db_name) is None:
+        if get_database_info(db_name, user_id=user_id) is None:
             raise ValueError(f"Database '{db_name}' not found")
 
         try:
             # 从内存中移除
-            if db_name in self.vector_dbs:
-                del self.vector_dbs[db_name]
+            self.vector_dbs.pop(self._cache_key(user_id, db_name), None)
 
             # 从磁盘/数据库中删除
-            success = delete_database(db_name)
+            success = delete_database(db_name, user_id=user_id)
             if not success:
                 raise ValueError(f"Database '{db_name}' not found")
 
@@ -262,7 +285,12 @@ class DatabaseService(BaseService):
             self.log_error(f"删除数据库失败: {e}")
             raise
 
-    def get_vector_db(self, db_name: str, model_name: Optional[str] = None):
+    def get_vector_db(
+        self,
+        db_name: str,
+        model_name: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ):
         """
         获取向量数据库实例。
 
@@ -277,8 +305,9 @@ class DatabaseService(BaseService):
             向量数据库实例，如果数据库不存在则返回 None
         """
         # 先从内存缓存中查找
-        if db_name in self.vector_dbs:
-            return self.vector_dbs[db_name]
+        cache_key = self._cache_key(user_id, db_name)
+        if cache_key in self.vector_dbs:
+            return self.vector_dbs[cache_key]
 
         # 确定使用的后端
         use_pgvector = os.environ.get("USE_PGVECTOR", "true").lower() == "true"
@@ -286,9 +315,9 @@ class DatabaseService(BaseService):
         # ── 存在性检查 ──────────────────────────────────────────────────
         # 必须在实例化 VectorDB 之前做，否则 PGVector 会懒创建集合
         if use_pgvector:
-            exists = get_database_info(db_name) is not None
+            exists = get_database_info(db_name, user_id=user_id) is not None
         else:
-            persist_dir = get_persist_directory(db_name)
+            persist_dir = get_persist_directory(db_name, user_id)
             exists = os.path.exists(persist_dir)
 
         if not exists:
@@ -306,7 +335,7 @@ class DatabaseService(BaseService):
             # 使用提供的模型名或默认模型
             if not model_name:
                 # 优先使用知识库自身记录的模型名
-                info = get_database_info(db_name)
+                info = get_database_info(db_name, user_id=user_id)
                 model_name = (info or {}).get("embedding_model_name") or os.environ.get(
                     "DEFAULT_EMBEDDING_MODEL", "text-embedding-v4"
                 )
@@ -322,9 +351,10 @@ class DatabaseService(BaseService):
 
                 vector_db = PgvectorVectorDB(
                     connection_string=db_url,
-                    db_name=db_name,
+                    db_name=get_scoped_db_name(user_id, db_name),
                     model_name=model_name,
                     embedding_api_url=embedding_api_url,
+                    user_id=user_id,
                 )
                 self.log_info(
                     f"从 PostgreSQL 加载数据库: {db_name} (模型: {model_name})"
@@ -336,11 +366,12 @@ class DatabaseService(BaseService):
                     embedding_api_url=embedding_api_url,
                     model_name=model_name,
                     persist_directory=persist_dir,
+                    user_id=user_id,
                 )
                 self.log_info(f"从文件系统加载数据库: {db_name} (模型: {model_name})")
 
             # 缓存到内存
-            self.vector_dbs[db_name] = vector_db
+            self.vector_dbs[cache_key] = vector_db
             return vector_db
 
         except Exception as e:
@@ -352,6 +383,7 @@ class DatabaseService(BaseService):
         db_name: str,
         new_name: Optional[str] = None,
         new_description: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         更新知识库的显示名称和/或描述（PATCH 语义）。
@@ -367,7 +399,7 @@ class DatabaseService(BaseService):
         Raises:
             ValueError: 知识库不存在
         """
-        info = get_database_info(db_name)
+        info = get_database_info(db_name, user_id=user_id)
         if info is None:
             raise ValueError(f"Database '{db_name}' not found")
 
@@ -387,9 +419,11 @@ class DatabaseService(BaseService):
                             "SELECT cmetadata FROM langchain_pg_collection"
                             " WHERE name = :name"
                         ),
-                        {"name": db_name},
+                        {"name": get_scoped_db_name(user_id, db_name)},
                     ).fetchone()
                     metadata = dict(row[0]) if row and row[0] else {}
+                    if user_id is not None and metadata.get("user_id") != user_id:
+                        raise ValueError(f"Database '{db_name}' not found")
 
                 if new_name is not None:
                     metadata["name"] = new_name
@@ -405,7 +439,7 @@ class DatabaseService(BaseService):
                         ),
                         {
                             "meta": json.dumps(metadata, ensure_ascii=False),
-                            "name": db_name,
+                            "name": get_scoped_db_name(user_id, db_name),
                         },
                     )
                     conn.commit()
@@ -417,7 +451,7 @@ class DatabaseService(BaseService):
 
             from app.dao.DataBase import get_persist_directory
 
-            db_path = get_persist_directory(db_name)
+            db_path = get_persist_directory(db_name, user_id)
             metadata_file = os.path.join(db_path, "metadata.json")
             metadata = {}
             if os.path.exists(metadata_file):
@@ -431,4 +465,4 @@ class DatabaseService(BaseService):
                 json.dump(metadata, f, ensure_ascii=False, indent=2)
 
         self.log_info(f"知识库 {db_name} 元数据已更新")
-        return get_database_info(db_name)
+        return get_database_info(db_name, user_id=user_id)

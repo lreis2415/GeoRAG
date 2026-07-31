@@ -1,6 +1,8 @@
 #!/usr/bin/python
 # -*- coding:utf-8 -*-
+import hashlib
 import os
+import re
 import shutil
 import sys
 from datetime import datetime
@@ -34,23 +36,31 @@ os.makedirs(documents_dir, exist_ok=True)
 os.makedirs(database_dir, exist_ok=True)
 
 
-def get_persist_directory(db_name: str) -> str:
-    """获取向量数据库存储路径"""
-    db_name = db_name.replace(":", "-")
-    return os.path.join(database_dir, db_name)
+def get_scoped_db_name(user_id: Optional[str], db_name: str) -> str:
+    """Return a storage-only collection name scoped to one Java user."""
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "-", db_name).strip(".") or "default"
+    if not user_id:
+        return safe_name
+    user_hash = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
+    return f"user_{user_hash}_{safe_name}"
 
 
-def get_all_databases() -> List[Dict]:
+def get_persist_directory(db_name: str, user_id: Optional[str] = None) -> str:
+    """获取按用户隔离的向量数据库存储路径"""
+    return os.path.join(database_dir, get_scoped_db_name(user_id, db_name))
+
+
+def get_all_databases(user_id: Optional[str] = None) -> List[Dict]:
     """获取所有知识库详细信息"""
     use_pgvector = os.environ.get("USE_PGVECTOR", "true").lower() == "true"
 
     if use_pgvector:
-        return _get_all_databases_pgvector()
+        return _get_all_databases_pgvector(user_id)
     else:
-        return _get_all_databases_chromadb()
+        return _get_all_databases_chromadb(user_id)
 
 
-def _get_all_databases_pgvector() -> List[Dict]:
+def _get_all_databases_pgvector(user_id: Optional[str] = None) -> List[Dict]:
     """从 PostgreSQL 获取所有知识库详细信息"""
     try:
         from sqlalchemy import create_engine, text
@@ -84,6 +94,8 @@ def _get_all_databases_pgvector() -> List[Dict]:
                 uuid = row[0]
                 name = row[1]
                 cmetadata = row[2] or {}
+                if user_id is not None and cmetadata.get("user_id") != user_id:
+                    continue
                 created_at_db = row[3]
                 document_count = row[4] or 0
 
@@ -115,7 +127,7 @@ def _get_all_databases_pgvector() -> List[Dict]:
         return []
 
 
-def _get_all_databases_chromadb() -> List[Dict]:
+def _get_all_databases_chromadb(user_id: Optional[str] = None) -> List[Dict]:
     """从 ChromaDB 目录获取所有知识库详细信息"""
     if not os.path.exists(database_dir):
         return []
@@ -137,6 +149,9 @@ def _get_all_databases_chromadb() -> List[Dict]:
                     metadata = json.load(f)
             except Exception as e:
                 print(f"⚠️ 读取元数据文件失败 {db_name}: {e}")
+
+        if user_id is not None and metadata.get("user_id") != user_id:
+            continue
 
         # 获取目录创建时间作为后备
         stat = os.stat(db_path)
@@ -182,7 +197,9 @@ def _get_all_databases_chromadb() -> List[Dict]:
     return databases
 
 
-def get_database_info(db_name: str) -> Optional[Dict]:
+def get_database_info(
+    db_name: str, user_id: Optional[str] = None
+) -> Optional[Dict]:
     """
     获取单个知识库详细信息
 
@@ -195,12 +212,14 @@ def get_database_info(db_name: str) -> Optional[Dict]:
     use_pgvector = os.environ.get("USE_PGVECTOR", "true").lower() == "true"
 
     if use_pgvector:
-        return _get_database_info_pgvector(db_name)
+        return _get_database_info_pgvector(db_name, user_id)
     else:
-        return _get_database_info_chromadb(db_name)
+        return _get_database_info_chromadb(db_name, user_id)
 
 
-def _get_database_info_pgvector(db_name: str) -> Optional[Dict]:
+def _get_database_info_pgvector(
+    db_name: str, user_id: Optional[str] = None
+) -> Optional[Dict]:
     """从 PostgreSQL 获取单个知识库详细信息"""
     try:
         from sqlalchemy import create_engine, text
@@ -226,7 +245,7 @@ def _get_database_info_pgvector(db_name: str) -> Optional[Dict]:
                     GROUP BY c.uuid, c.name, c.cmetadata, c.created_at
                 """
                 ),
-                {"name": db_name},
+                {"name": get_scoped_db_name(user_id, db_name)},
             )
             row = result.fetchone()
             if not row:
@@ -235,6 +254,8 @@ def _get_database_info_pgvector(db_name: str) -> Optional[Dict]:
             uuid = row[0]
             name = row[1]
             cmetadata = row[2] or {}
+            if user_id is not None and cmetadata.get("user_id") != user_id:
+                return None
             created_at_db = row[3]
             document_count = row[4] or 0
 
@@ -260,9 +281,11 @@ def _get_database_info_pgvector(db_name: str) -> Optional[Dict]:
         return None
 
 
-def _get_database_info_chromadb(db_name: str) -> Optional[Dict]:
+def _get_database_info_chromadb(
+    db_name: str, user_id: Optional[str] = None
+) -> Optional[Dict]:
     """从 ChromaDB 获取单个知识库详细信息"""
-    db_path = get_persist_directory(db_name)
+    db_path = get_persist_directory(db_name, user_id)
     if not os.path.exists(db_path):
         return None
 
@@ -277,6 +300,9 @@ def _get_database_info_chromadb(db_name: str) -> Optional[Dict]:
                 metadata = json.load(f)
         except Exception as e:
             print(f"⚠️ 读取元数据文件失败 {db_name}: {e}")
+
+    if user_id is not None and metadata.get("user_id") != user_id:
+        return None
 
     # 获取目录创建时间作为后备
     stat = os.stat(db_path)
@@ -319,7 +345,9 @@ def _get_database_info_chromadb(db_name: str) -> Optional[Dict]:
     }
 
 
-def get_database_files(db_name: str) -> List[Dict]:
+def get_database_files(
+    db_name: str, user_id: Optional[str] = None
+) -> List[Dict]:
     """
     获取知识库关联的文件列表
 
@@ -329,33 +357,57 @@ def get_database_files(db_name: str) -> List[Dict]:
     Returns:
         文件信息列表
     """
-    # 从 Pgvector 元数据中获取关联的文件列表
+    use_pgvector = os.environ.get("USE_PGVECTOR", "true").lower() == "true"
     files = []
-    try:
-        from sqlalchemy import create_engine, text
+    if use_pgvector:
+        try:
+            from sqlalchemy import create_engine, text
 
-        db_url = os.environ.get("DB_URL")
-        if db_url:
-            engine = create_engine(db_url)
-            with engine.connect() as conn:
-                result = conn.execute(
-                    text(
-                        "SELECT cmetadata FROM langchain_pg_collection "
-                        "WHERE name = :name"
-                    ),
-                    {"name": db_name},
-                )
-                row = result.fetchone()
-                if row and row[0]:
-                    metadata = row[0]
-                    files = metadata.get("files", [])
-    except Exception as e:
-        print(f"⚠️ 获取知识库文件列表失败: {e}")
+            db_url = os.environ.get("DB_URL")
+            if db_url:
+                engine = create_engine(db_url)
+                with engine.connect() as conn:
+                    result = conn.execute(
+                        text(
+                            "SELECT cmetadata FROM langchain_pg_collection "
+                            "WHERE name = :name"
+                        ),
+                        {"name": get_scoped_db_name(user_id, db_name)},
+                    )
+                    row = result.fetchone()
+                    if row and row[0]:
+                        metadata = row[0]
+                        if user_id is not None and metadata.get("user_id") != user_id:
+                            return []
+                        files = metadata.get("files", [])
+        except Exception as e:
+            print(f"⚠️ 获取知识库文件列表失败: {e}")
+    else:
+        metadata_file = os.path.join(
+            get_persist_directory(db_name, user_id), "metadata.json"
+        )
+        try:
+            import json
+
+            with open(metadata_file, "r", encoding="utf-8") as metadata_handle:
+                metadata = json.load(metadata_handle)
+            if user_id is None or metadata.get("user_id") == user_id:
+                files = metadata.get("files", [])
+        except FileNotFoundError:
+            return []
+        except Exception as e:
+            print(f"⚠️ 获取知识库文件列表失败: {e}")
 
     # 构建文件信息列表
     file_infos = []
     for filename in files:
-        file_path = os.path.join(documents_dir, filename)
+        file_path = os.path.join(
+            documents_dir,
+            hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
+            if user_id
+            else "legacy",
+            filename,
+        )
         if os.path.exists(file_path):
             stat = os.stat(file_path)
             file_infos.append(
@@ -371,7 +423,7 @@ def get_database_files(db_name: str) -> List[Dict]:
     return file_infos
 
 
-def delete_database(db_name: str) -> bool:
+def delete_database(db_name: str, user_id: Optional[str] = None) -> bool:
     """删除知识库"""
     use_pgvector = os.environ.get("USE_PGVECTOR", "true").lower() == "true"
 
@@ -385,7 +437,7 @@ def delete_database(db_name: str) -> bool:
 
             vector_db = PgvectorVectorDB(
                 connection_string=db_url,
-                db_name=db_name,
+                db_name=get_scoped_db_name(user_id, db_name),
                 model_name=model_name,
                 embedding_api_url=embedding_api_url,
             )
@@ -396,16 +448,25 @@ def delete_database(db_name: str) -> bool:
             return False
     else:
         # 删除 ChromaDB 目录
-        db_path = get_persist_directory(db_name)
+        db_path = get_persist_directory(db_name, user_id)
         if os.path.exists(db_path):
             shutil.rmtree(db_path)
             return True
         return False
 
 
-def save_uploaded_file(file, filename: str) -> str:
+def save_uploaded_file(
+    file, filename: str, user_id: Optional[str] = None
+) -> str:
     """保存上传的文件到documents目录"""
-    file_path = os.path.join(documents_dir, filename)
+    user_directory = (
+        hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
+        if user_id
+        else "legacy"
+    )
+    file_directory = os.path.join(documents_dir, user_directory)
+    os.makedirs(file_directory, exist_ok=True)
+    file_path = os.path.join(file_directory, filename)
     with open(file_path, "wb") as f:
         f.write(file.read())
     return file_path
@@ -417,6 +478,7 @@ def create_db(
     file_paths: List[str] = None,
     vector_db: Optional[VectorDB] = None,
     use_pgvector: Optional[bool] = None,
+    user_id: Optional[str] = None,
 ) -> VectorDB:
     """创建向量数据库
 
@@ -440,7 +502,8 @@ def create_db(
     if use_pgvector is None:
         use_pgvector = os.environ.get("USE_PGVECTOR", "true").lower() == "true"
 
-    persist_directory = get_persist_directory(db_name)
+    storage_db_name = get_scoped_db_name(user_id, db_name)
+    persist_directory = get_persist_directory(db_name, user_id)
 
     if vector_db is None:
         try:
@@ -454,9 +517,10 @@ def create_db(
 
                 vector_db = PgvectorVectorDB(
                     connection_string=db_url,
-                    db_name=db_name,
+                    db_name=storage_db_name,
                     model_name=model_name,
                     embedding_api_url=embedding_api_url,
+                    user_id=user_id,
                 )
             else:
                 # 使用 ChromaDB (原有实现)
@@ -464,6 +528,7 @@ def create_db(
                     embedding_api_url=embedding_api_url,
                     model_name=model_name,
                     persist_directory=persist_directory,
+                    user_id=user_id,
                 )
         except Exception as e:
             raise ValueError(f"创建向量数据库失败: {str(e)}")
@@ -498,6 +563,8 @@ def create_db(
     # 保存元数据
     metadata = {
         "name": db_name,  # 默认使用db_name作为显示名称
+        "user_id": user_id,
+        "storage_db_name": storage_db_name,
         "embedding_model_name": model_name,
         "created_at": datetime.now().isoformat(),
         "document_count": 0,

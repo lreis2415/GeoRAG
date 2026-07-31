@@ -41,11 +41,15 @@ CREATE INDEX IF NOT EXISTS idx_langchain_pg_collection_cmetadata
 -- 2. 集合元数据表（可选，用于知识库管理）
 CREATE TABLE IF NOT EXISTS vector_collections (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL,
     name TEXT UNIQUE NOT NULL,
     cmetadata JSONB,
     "uuid" UUID UNIQUE DEFAULT gen_random_uuid(),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_vector_collections_user
+    ON vector_collections (user_id);
 
 -- 2. 创建 HNSW 索引以优化查询性能（在首次插入数据后自动创建）
 -- CREATE INDEX IF NOT EXISTS idx_langchain_pg_embedding_embedding_vector

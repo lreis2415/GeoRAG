@@ -98,6 +98,7 @@ class FlexibleVectorDB(VectorDB):
         persist_directory: str,
         delimiter: str = ",",
         text_splitter_config: Optional[Dict] = None,
+        user_id: Optional[str] = None,
     ):
         """
         初始化 FlexibleVectorDB。
@@ -127,6 +128,7 @@ class FlexibleVectorDB(VectorDB):
             "chunk_size": 1000,
             "chunk_overlap": 200,
         }
+        self._user_id = user_id
 
         # 创建自定义嵌入函数
         try:
@@ -155,6 +157,8 @@ class FlexibleVectorDB(VectorDB):
         # print(f"开始嵌入 {len(documents)} 个文档")
         for i in range(0, len(documents), batch_size):
             batch = documents[i : i + batch_size]
+            for document in batch:
+                document.metadata["user_id"] = self._user_id
             vectordb.add_documents(batch)
 
     def embed_csv(self, file_path: str) -> None:

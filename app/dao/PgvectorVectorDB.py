@@ -31,6 +31,7 @@ class PgvectorVectorDB(VectorDB):
         model_name: str,
         embedding_api_url: str,
         text_splitter_config: Optional[Dict] = None,
+        user_id: Optional[str] = None,
     ):
         """
         初始化 PgvectorVectorDB
@@ -58,6 +59,7 @@ class PgvectorVectorDB(VectorDB):
         self._db_name = db_name
         self._model_name = model_name
         self._embedding_api_url = embedding_api_url
+        self._user_id = user_id
         self._text_splitter_config = text_splitter_config or {
             "chunk_size": 1000,
             "chunk_overlap": 200,
@@ -103,6 +105,10 @@ class PgvectorVectorDB(VectorDB):
         """
         try:
             vector_store = self.get_vector_store()
+
+            for document in documents:
+                document.metadata["user_id"] = self._user_id
+                document.metadata["collection_name"] = self._db_name
 
             print(f"🔄 开始嵌入 {len(documents)} 个文档到数据库: {self._db_name}")
 

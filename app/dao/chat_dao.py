@@ -1,11 +1,13 @@
+import hashlib
 import logging
+from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.models.chat_models import ChatMessage, ChatSession
+from app.models.chat_models import ChatMessage, ChatRun, ChatSession, ToolRun
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +16,47 @@ class ChatDAO:
     """聊天数据访问对象"""
 
     _title_column_checked = False
+    _observability_tables_checked = False
+
+    @classmethod
+    def _ensure_observability_tables(cls, db: Session) -> None:
+        """Create audit tables for deployments that predate observability."""
+        if cls._observability_tables_checked:
+            return
+
+        try:
+            engine = db.get_bind()
+            if engine is None:
+                return
+            ChatRun.__table__.create(bind=engine, checkfirst=True)
+            ToolRun.__table__.create(bind=engine, checkfirst=True)
+            cls._observability_tables_checked = True
+        except Exception:
+            db.rollback()
+            logger.exception("创建聊天审计表失败")
+            raise
+
+    @staticmethod
+    def _payload_digest(value: object) -> str:
+        """Return a bounded, non-reversible diagnostic summary for a payload."""
+        if isinstance(value, bytes):
+            prefix = value[:4096]
+            return (
+                f"bytes={len(value)} sha256_prefix="
+                f"{hashlib.sha256(prefix).hexdigest()[:16]}"
+            )
+        if isinstance(value, str):
+            prefix = value[:4096].encode("utf-8", errors="replace")
+            return (
+                f"chars={len(value)} sha256_prefix="
+                f"{hashlib.sha256(prefix).hexdigest()[:16]}"
+            )
+        return f"type={type(value).__name__}"
+
+    @staticmethod
+    def _error_summary(error: object, max_length: int = 2000) -> str:
+        message = str(error).replace("\x00", " ").strip()
+        return message[:max_length]
 
     @classmethod
     def _ensure_title_column(cls, db: Session) -> None:
@@ -40,7 +83,12 @@ class ChatDAO:
             db.rollback()
 
     @staticmethod
-    def save_session(db: Session, session_id: str, title: Optional[str] = None) -> None:
+    def save_session(
+        db: Session,
+        session_id: str,
+        title: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
         """
         保存会话到数据库
 
@@ -56,10 +104,14 @@ class ChatDAO:
             ChatDAO._ensure_title_column(db)
             existing_session = db.get(ChatSession, session_id)
             if existing_session:
+                if user_id is not None and existing_session.user_id != user_id:
+                    raise ValueError("Session belongs to another user")
                 if title is not None:
                     existing_session.title = title
             else:
-                db.add(ChatSession(session_id=session_id, title=title))
+                db.add(
+                    ChatSession(session_id=session_id, title=title, user_id=user_id)
+                )
             db.commit()
             logger.debug(f"Session saved: {session_id}")
         except SQLAlchemyError as e:
@@ -68,15 +120,16 @@ class ChatDAO:
             raise
 
     @staticmethod
-    def get_session(db: Session, session_id: str) -> Optional[dict]:
+    def get_session(
+        db: Session, session_id: str, user_id: Optional[str] = None
+    ) -> Optional[dict]:
         """获取单个会话信息"""
         try:
             ChatDAO._ensure_title_column(db)
-            session = (
-                db.query(ChatSession)
-                .filter(ChatSession.session_id == session_id)
-                .first()
-            )
+            query = db.query(ChatSession).filter(ChatSession.session_id == session_id)
+            if user_id is not None:
+                query = query.filter(ChatSession.user_id == user_id)
+            session = query.first()
             if not session:
                 return None
 
@@ -92,7 +145,9 @@ class ChatDAO:
             return None
 
     @staticmethod
-    def update_session_title(db: Session, session_id: str, title: str) -> bool:
+    def update_session_title(
+        db: Session, session_id: str, title: str, user_id: Optional[str] = None
+    ) -> bool:
         """
         更新会话标题
 
@@ -106,11 +161,10 @@ class ChatDAO:
         """
         try:
             ChatDAO._ensure_title_column(db)
-            result = (
-                db.query(ChatSession)
-                .filter(ChatSession.session_id == session_id)
-                .update({"title": title})
-            )
+            query = db.query(ChatSession).filter(ChatSession.session_id == session_id)
+            if user_id is not None:
+                query = query.filter(ChatSession.user_id == user_id)
+            result = query.update({"title": title})
             db.commit()
             return result > 0
         except SQLAlchemyError as e:
@@ -125,6 +179,7 @@ class ChatDAO:
         role: str,
         content: str,
         message_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> str:
         """
         保存消息到数据库
@@ -154,10 +209,23 @@ class ChatDAO:
                 content = content[:max_length] + "...[截断]"
                 logger.warning(f"消息内容超过{max_length}字符，已截断")
 
+            if user_id is not None:
+                session_exists = (
+                    db.query(ChatSession)
+                    .filter(
+                        ChatSession.session_id == session_id,
+                        ChatSession.user_id == user_id,
+                    )
+                    .first()
+                )
+                if session_exists is None:
+                    raise ValueError("Session not found")
+
             # 创建消息对象
             message = ChatMessage(
                 message_id=message_id or ChatMessage.create_id(),
                 session_id=session_id,
+                user_id=user_id,
                 role=role,
                 content=content,
             )
@@ -172,9 +240,137 @@ class ChatDAO:
             logger.error(f"保存消息到数据库失败: {e}")
             raise
 
+    @classmethod
+    def create_chat_run(
+        cls,
+        db: Session,
+        request_id: str,
+        session_id: Optional[str] = None,
+        user_message_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
+        """Persist a running request before LLM or MCP work begins."""
+        try:
+            cls._ensure_observability_tables(db)
+            db.add(
+                ChatRun(
+                    request_id=request_id,
+                    session_id=session_id,
+                    user_message_id=user_message_id,
+                    user_id=user_id,
+                    status="running",
+                )
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("创建聊天运行记录失败: request_id=%s", request_id)
+            raise
+
+    @classmethod
+    def finish_chat_run(
+        cls,
+        db: Session,
+        request_id: str,
+        status: str,
+        started_at: datetime,
+        error: Optional[object] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
+        """Record the terminal state of a chat request."""
+        try:
+            cls._ensure_observability_tables(db)
+            query = db.query(ChatRun).filter(ChatRun.request_id == request_id)
+            if user_id is not None:
+                query = query.filter(ChatRun.user_id == user_id)
+            run = query.first()
+            if not run:
+                logger.warning("聊天运行记录不存在: request_id=%s", request_id)
+                return
+            finished_at = datetime.now()
+            run.status = status
+            run.finished_at = finished_at
+            run.duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+            if error is not None:
+                run.error_type = type(error).__name__
+                run.error_message = cls._error_summary(error)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("更新聊天运行记录失败: request_id=%s", request_id)
+
+    @classmethod
+    def start_tool_run(
+        cls,
+        db: Session,
+        tool_run_id: str,
+        request_id: str,
+        tool_name: Optional[str],
+        tool_input: object,
+        user_id: Optional[str] = None,
+    ) -> None:
+        """Persist a tool's start using only a bounded input digest."""
+        try:
+            cls._ensure_observability_tables(db)
+            if db.get(ToolRun, tool_run_id):
+                return
+            db.add(
+                ToolRun(
+                    tool_run_id=tool_run_id,
+                    request_id=request_id,
+                    user_id=user_id,
+                    tool_name=tool_name,
+                    status="running",
+                    input_digest=cls._payload_digest(tool_input),
+                )
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "创建工具运行记录失败: request_id=%s tool_run_id=%s",
+                request_id,
+                tool_run_id,
+            )
+
+    @classmethod
+    def finish_tool_run(
+        cls,
+        db: Session,
+        tool_run_id: str,
+        status: str,
+        output: Optional[object] = None,
+        error: Optional[object] = None,
+        user_id: Optional[str] = None,
+    ) -> None:
+        """Persist a tool's terminal state and a bounded diagnostic."""
+        try:
+            cls._ensure_observability_tables(db)
+            query = db.query(ToolRun).filter(ToolRun.tool_run_id == tool_run_id)
+            if user_id is not None:
+                query = query.filter(ToolRun.user_id == user_id)
+            run = query.first()
+            if not run:
+                logger.warning("工具运行记录不存在: tool_run_id=%s", tool_run_id)
+                return
+            run.status = status
+            run.finished_at = datetime.now()
+            if output is not None:
+                run.output_digest = cls._payload_digest(output)
+            if error is not None:
+                run.error_message = cls._error_summary(error)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("更新工具运行记录失败: tool_run_id=%s", tool_run_id)
+
     @staticmethod
     def get_session_messages(
-        db: Session, session_id: str, limit: int = 100, offset: int = 0
+        db: Session,
+        session_id: str,
+        limit: int = 100,
+        offset: int = 0,
+        user_id: Optional[str] = None,
     ) -> List[dict]:
         """
         获取指定会话的消息历史
@@ -189,10 +385,11 @@ class ChatDAO:
             List[dict]: 消息列表，每个消息是包含角色和内容的字典
         """
         try:
+            query = db.query(ChatMessage).filter(ChatMessage.session_id == session_id)
+            if user_id is not None:
+                query = query.filter(ChatMessage.user_id == user_id)
             messages = (
-                db.query(ChatMessage)
-                .filter(ChatMessage.session_id == session_id)
-                .order_by(ChatMessage.created_at.asc())
+                query.order_by(ChatMessage.created_at.asc())
                 .offset(offset)
                 .limit(limit)
                 .all()
@@ -205,7 +402,9 @@ class ChatDAO:
             return []
 
     @staticmethod
-    def delete_session(db: Session, session_id: str) -> bool:
+    def delete_session(
+        db: Session, session_id: str, user_id: Optional[str] = None
+    ) -> bool:
         """
         删除指定会话及其所有消息
 
@@ -218,14 +417,20 @@ class ChatDAO:
         """
         try:
             # 先删除消息
-            db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete()
+            message_query = db.query(ChatMessage).filter(
+                ChatMessage.session_id == session_id
+            )
+            if user_id is not None:
+                message_query = message_query.filter(ChatMessage.user_id == user_id)
+            message_query.delete()
 
             # 再删除会话
-            result = (
-                db.query(ChatSession)
-                .filter(ChatSession.session_id == session_id)
-                .delete()
+            session_query = db.query(ChatSession).filter(
+                ChatSession.session_id == session_id
             )
+            if user_id is not None:
+                session_query = session_query.filter(ChatSession.user_id == user_id)
+            result = session_query.delete()
 
             db.commit()
             return result > 0
@@ -236,7 +441,9 @@ class ChatDAO:
             return False
 
     @staticmethod
-    def get_all_sessions(db: Session) -> List[dict]:
+    def get_all_sessions(
+        db: Session, user_id: Optional[str] = None
+    ) -> List[dict]:
         """
         获取所有会话信息
 
@@ -249,17 +456,18 @@ class ChatDAO:
         try:
             ChatDAO._ensure_title_column(db)
             # 获取所有会话及其消息数量
+            query = db.query(
+                ChatSession.session_id,
+                ChatSession.title,
+                ChatSession.created_at,
+                func.count(ChatMessage.message_id).label("message_count"),
+            ).outerjoin(
+                ChatMessage, ChatSession.session_id == ChatMessage.session_id
+            )
+            if user_id is not None:
+                query = query.filter(ChatSession.user_id == user_id)
             sessions = (
-                db.query(
-                    ChatSession.session_id,
-                    ChatSession.title,
-                    ChatSession.created_at,
-                    func.count(ChatMessage.message_id).label("message_count"),
-                )
-                .outerjoin(
-                    ChatMessage, ChatSession.session_id == ChatMessage.session_id
-                )
-                .group_by(
+                query.group_by(
                     ChatSession.session_id, ChatSession.title, ChatSession.created_at
                 )
                 .order_by(ChatSession.created_at.desc())
@@ -281,7 +489,7 @@ class ChatDAO:
             return []
 
     @staticmethod
-    def clear_all_sessions(db: Session) -> bool:
+    def clear_all_sessions(db: Session, user_id: Optional[str] = None) -> bool:
         """
         清空所有会话和消息
 
@@ -293,9 +501,14 @@ class ChatDAO:
         """
         try:
             # 删除所有消息
-            db.query(ChatMessage).delete()
+            message_query = db.query(ChatMessage)
+            session_query = db.query(ChatSession)
+            if user_id is not None:
+                message_query = message_query.filter(ChatMessage.user_id == user_id)
+                session_query = session_query.filter(ChatSession.user_id == user_id)
+            message_query.delete()
             # 删除所有会话
-            db.query(ChatSession).delete()
+            session_query.delete()
             db.commit()
             return True
 
@@ -305,7 +518,9 @@ class ChatDAO:
             return False
 
     @staticmethod
-    def get_session_history(db: Session, session_id: str) -> List[dict]:
+    def get_session_history(
+        db: Session, session_id: str, user_id: Optional[str] = None
+    ) -> List[dict]:
         """
         获取指定会话的历史消息
 
@@ -317,17 +532,15 @@ class ChatDAO:
             List[dict]: 消息列表，包含 message_id/role/content/created_at
         """
         try:
-            messages = (
-                db.query(
-                    ChatMessage.message_id,
-                    ChatMessage.role,
-                    ChatMessage.content,
-                    ChatMessage.created_at,
-                )
-                .filter(ChatMessage.session_id == session_id)
-                .order_by(ChatMessage.created_at.asc())
-                .all()
-            )
+            query = db.query(
+                ChatMessage.message_id,
+                ChatMessage.role,
+                ChatMessage.content,
+                ChatMessage.created_at,
+            ).filter(ChatMessage.session_id == session_id)
+            if user_id is not None:
+                query = query.filter(ChatMessage.user_id == user_id)
+            messages = query.order_by(ChatMessage.created_at.asc()).all()
 
             return [
                 {

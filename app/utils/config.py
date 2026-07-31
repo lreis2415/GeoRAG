@@ -95,6 +95,7 @@ class AppConfig:
     # API配置
     API_PREFIX = "/llm/v1"
     REDOC_URL = None
+    MCP_AGENT_TIMEOUT_SECONDS = float(os.getenv("MCP_AGENT_TIMEOUT_SECONDS", "300"))
 
     # 响应状态码
     SUCCESS_CODE = 2000
