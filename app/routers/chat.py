@@ -192,10 +192,56 @@ async def chat_with_agent(
             db, request_id, "succeeded", started_at, user_id=current_user.user_id
         )
         return success_response(data=result)
+    except asyncio.TimeoutError as e:
+        if run_created:
+            chat_dao.finish_chat_run(
+                db,
+                request_id,
+                "timed_out",
+                started_at,
+                e,
+                user_id=current_user.user_id,
+            )
+        logger.error(
+            "聊天请求超时: request_id=%s timeout_seconds=%s",
+            request_id,
+            config.MCP_AGENT_TIMEOUT_SECONDS,
+        )
+        return error_response(message="聊天调用超时", code=5010)
+    except asyncio.CancelledError as e:
+        if run_created:
+            chat_dao.finish_chat_run(
+                db,
+                request_id,
+                "cancelled",
+                started_at,
+                e,
+                user_id=current_user.user_id,
+            )
+        logger.warning("聊天请求已取消: request_id=%s", request_id)
+        raise
     except ValueError as e:
+        if run_created:
+            chat_dao.finish_chat_run(
+                db,
+                request_id,
+                "failed",
+                started_at,
+                e,
+                user_id=current_user.user_id,
+            )
         return error_response(message=str(e), code=4000)
     except Exception as e:
-        logger.error(f"聊天处理异常: {e}")
+        if run_created:
+            chat_dao.finish_chat_run(
+                db,
+                request_id,
+                "failed",
+                started_at,
+                e,
+                user_id=current_user.user_id,
+            )
+        logger.exception("聊天处理异常: request_id=%s", request_id)
         return error_response(message=str(e), code=5010)
 
 

@@ -257,9 +257,12 @@ class PgvectorVectorDB(VectorDB):
 
     def update_collection_metadata(self, metadata: Dict) -> None:
         """
-        更新集合元数据。
-        如果集合记录尚不存在（懒创建），先调用 get_vector_store() 触发 PGVector
-        在 langchain_pg_collection 表中插入记录，再执行 UPDATE。
+        更新集合元数据，并确保集合已经由 PGVector 初始化。
+
+        ``langchain_pg_collection`` 和 ``langchain_pg_embedding`` 不是
+        pgvector 扩展自带的表，而是由 ``langchain-postgres`` 在首次创建
+        ``PGVector`` 实例时建立。必须先初始化 PGVector，才能查询或更新
+        这些表；否则创建一个没有文件的知识库时会在首次 SELECT 处失败。
 
         Args:
             metadata: 元数据字典
@@ -271,22 +274,14 @@ class PgvectorVectorDB(VectorDB):
 
             engine = create_engine(self._connection_string)
 
-            # 确保 langchain_pg_collection 中已存在该集合的记录
-            with engine.connect() as conn:
-                exists = conn.execute(
-                    text("SELECT 1 FROM langchain_pg_collection WHERE name = :name"),
-                    {"name": self._db_name},
-                ).fetchone()
+            # PGVector 初始化会创建 LangChain 所需的表和当前 collection。
+            # 这一步必须位于任何对 langchain_pg_* 表的原始 SQL 操作之前。
+            self.get_vector_store()
 
-            if not exists:
-                # 触发 PGVector 创建集合记录
-                # (PGVector.__init__ 会 CREATE TABLE / INSERT collection)
-                self.get_vector_store()
-
-            with engine.connect() as conn:
+            with engine.begin() as conn:
                 # psycopg3 无法自动将 dict 适配为 JSONB，需手动序列化为 JSON 字符串
                 # 使用 CAST 显式将字符串转换为 jsonb 类型
-                conn.execute(
+                result = conn.execute(
                     text(
                         "UPDATE langchain_pg_collection"
                         " SET cmetadata = CAST(:metadata AS jsonb)"
@@ -297,7 +292,8 @@ class PgvectorVectorDB(VectorDB):
                         "name": self._db_name,
                     },
                 )
-                conn.commit()
+                if result.rowcount != 1:
+                    raise RuntimeError(f"集合 '{self._db_name}' 未创建")
             print(f"✅ 集合 {self._db_name} 元数据已更新")
         except Exception as e:
             raise RuntimeError(f"更新集合元数据失败: {str(e)}")

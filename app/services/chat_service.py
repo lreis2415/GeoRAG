@@ -497,6 +497,13 @@ class ChatService(BaseService):
         else:
             return ChatOllama(model=chat_model_name, temperature=0.1, verbose=True)
 
+    @staticmethod
+    async def _await_with_timeout(awaitable, timeout_seconds: Optional[float]):
+        """Await an operation with Python 3.9-compatible timeout support."""
+        if timeout_seconds is None:
+            return await awaitable
+        return await asyncio.wait_for(awaitable, timeout=timeout_seconds)
+
     async def chat_with_agent(
         self,
         prompt: str,
@@ -525,6 +532,10 @@ class ChatService(BaseService):
             history: 历史对话记录 (可选)
             db_name: 知识库名称 (可选，提供时启用RAG)
             mcp_tools: MCP工具列表 (可选)
+            request_id: 请求追踪ID（用于日志和工具审计）
+            db: 当前请求的数据库会话（用于工具审计）
+            tool_db_factory: 工具审计独立数据库会话工厂
+            timeout_seconds: Agent/LLM 调用超时秒数，None 表示不限制
 
         Returns:
             智能体的回答和会话ID
@@ -541,7 +552,12 @@ class ChatService(BaseService):
         if not query:
             raise ValueError("query is required")
 
-        self.log_info(f"开始聊天对话，模型: {chat_model_name}, 会话: {session_id}")
+        self.logger.info(
+            "开始聊天对话: request_id=%s model=%s session_id=%s",
+            request_id,
+            chat_model_name,
+            session_id,
+        )
 
         try:
             # 1. 构建工具列表
@@ -608,23 +624,37 @@ class ChatService(BaseService):
                 )
                 llm = self._create_llm(chat_model_name)
                 agent = create_react_agent(llm, tools)
-                handler = MCPToolLoggingHandler(self.logger)
-                result = await agent.ainvoke(
-                    {"messages": messages}, config={"callbacks": [handler]}
+                handler = MCPToolLoggingHandler(
+                    self.logger,
+                    request_id=request_id,
+                    db=db,
+                    db_factory=tool_db_factory,
+                    user_id=user_id,
                 )
-                self.log_info(f"Agent 调用完成，响应: {result}")
+                result = await self._await_with_timeout(
+                    agent.ainvoke(
+                        {"messages": messages}, config={"callbacks": [handler]}
+                    ),
+                    timeout_seconds,
+                )
 
                 ai_response = result["messages"][-1].content
             else:
                 # 直接对话模式（不使用工具）
                 llm = self._create_llm(chat_model_name)
-                response = await llm.ainvoke(messages)
+                response = await self._await_with_timeout(
+                    llm.ainvoke(messages), timeout_seconds
+                )
                 ai_response = response.content
 
-            self.log_info(f"聊天对话完成，响应长度: {len(ai_response)}")
+            self.logger.info(
+                "聊天对话完成: request_id=%s response_length=%s",
+                request_id,
+                len(ai_response),
+            )
 
             return {"response": ai_response, "session_id": session_id}
 
-        except Exception as e:
-            self.log_error(f"聊天对话失败: {e}")
+        except Exception:
+            self.logger.exception("聊天对话失败: request_id=%s", request_id)
             raise

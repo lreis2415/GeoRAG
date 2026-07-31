@@ -36,8 +36,13 @@ services:
       # DB
       APP_ENV: ${APP_ENV:-docker}
       DB_URL: postgresql+psycopg://geo:123456@postgres:5432/georag_dev
+      LOG_TO_FILE: ${LOG_TO_FILE:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_DIR: /GeoRAGApp/logs
+      MCP_AGENT_TIMEOUT_SECONDS: ${MCP_AGENT_TIMEOUT_SECONDS:-300}
     volumes:
       - ./data:/GeoRAGApp/data
+      - ./logs:/GeoRAGApp/logs
     depends_on:
       postgres:
         condition: service_healthy

@@ -71,6 +71,11 @@ def _get_all_databases_pgvector(user_id: Optional[str] = None) -> List[Dict]:
 
         engine = create_engine(db_url)
         with engine.connect() as conn:
+            # 首次创建知识库之前，LangChain 的 PGVector 表尚不存在。这是一个
+            # 合法的空知识库列表状态，不应被记录为查询失败。
+            if not conn.dialect.has_table(conn, "langchain_pg_collection"):
+                return []
+
             # 查询 langchain_pg_collection 表，包含元数据和 UUID
             result = conn.execute(
                 text(
@@ -230,6 +235,9 @@ def _get_database_info_pgvector(
 
         engine = create_engine(db_url)
         with engine.connect() as conn:
+            if not conn.dialect.has_table(conn, "langchain_pg_collection"):
+                return None
+
             result = conn.execute(
                 text(
                     """
@@ -583,7 +591,9 @@ def create_db(
             with open(metadata_file, "w", encoding="utf-8") as f:
                 json.dump(metadata, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"⚠️ 保存元数据失败: {e}")
+        # 元数据是空知识库在 pgvector 中的唯一可见记录。继续返回“创建成功”
+        # 会产生无法在列表中查询到的幽灵知识库，因此必须将失败交给调用方。
+        raise ValueError(f"保存知识库元数据失败: {e}") from e
 
     return vector_db
 
