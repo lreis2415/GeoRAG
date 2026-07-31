@@ -1,5 +1,6 @@
 """FastAPI dependencies for authenticated requests."""
 
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -30,10 +31,38 @@ def _unauthorized(detail: str = "Authentication required") -> HTTPException:
     )
 
 
+def _authentication_enabled() -> bool:
+    """Read the auth switch on every request so local debugging is easy."""
+    value = os.getenv("AUTH_ENABLED", "true").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _debug_user() -> CurrentUser:
+    """Return a deterministic local identity when authentication is disabled."""
+    user_id = os.getenv("AUTH_DEBUG_USER_ID", "debug-user").strip()
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                "AUTH_DEBUG_USER_ID must be configured when authentication "
+                "is disabled"
+            ),
+        )
+    return CurrentUser(
+        user_id=user_id,
+        username="debug-user",
+        role="DEBUG",
+        claims={"sub": user_id, "debug": True},
+    )
+
+
 def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Security(http_bearer),
 ) -> CurrentUser:
-    """Require and verify a Bearer JWT for a protected FastAPI endpoint."""
+    """Resolve the current user from JWT, or a local debug identity."""
+    if not _authentication_enabled():
+        return _debug_user()
+
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise _unauthorized()
 

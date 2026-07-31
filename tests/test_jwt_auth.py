@@ -82,7 +82,8 @@ def test_verify_rejects_wrong_key(rsa_keys):
         verify_token(token)
 
 
-def test_fastapi_dependency_returns_current_user(rsa_keys):
+def test_fastapi_dependency_returns_current_user(rsa_keys, monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "true")
     token = make_token(rsa_keys, name="Alice", userType="ADMIN")
     credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
@@ -94,13 +95,36 @@ def test_fastapi_dependency_returns_current_user(rsa_keys):
     assert current_user.role == "ADMIN"
 
 
-def test_missing_credentials_returns_401():
+def test_missing_credentials_returns_401(monkeypatch):
     from fastapi import HTTPException
 
+    monkeypatch.setenv("AUTH_ENABLED", "true")
     with pytest.raises(HTTPException) as exc_info:
         get_current_user(None)
 
     assert exc_info.value.status_code == 401
+
+
+def test_auth_can_be_disabled_for_local_debugging(monkeypatch):
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("AUTH_DEBUG_USER_ID", "local-debug-user")
+
+    current_user = get_current_user(None)
+
+    assert current_user.user_id == "local-debug-user"
+    assert current_user.role == "DEBUG"
+
+
+def test_disabled_auth_requires_debug_user_id(monkeypatch):
+    from fastapi import HTTPException
+
+    monkeypatch.setenv("AUTH_ENABLED", "false")
+    monkeypatch.setenv("AUTH_DEBUG_USER_ID", "")
+
+    with pytest.raises(HTTPException) as exc_info:
+        get_current_user(None)
+
+    assert exc_info.value.status_code == 500
 
 
 def test_missing_public_key_is_server_error(tmp_path, monkeypatch):
