@@ -38,6 +38,10 @@ export DB_URL=postgresql://user:password@host:port/database
 export USE_PGVECTOR=true  # 使用 Pgvector (推荐)
 # export USE_PGVECTOR=false  # 使用 ChromaDB
 export DEFAULT_EMBEDDING_MODEL=text-embedding-v4
+
+# 一键启动脚本 (start-mac.sh / start-win.bat) 使用的 conda 环境名称，
+# 不设置时使用脚本默认值 langchain_v03。
+export GEORAG_CONDA_ENV=langchain_v03
 ```
 
 ### 启动数据库
@@ -81,6 +85,53 @@ uvicorn main:app --host 0.0.0.0 --port 7512 --reload
 - 服务地址：http://0.0.0.0:7512
 - API 文档：http://0.0.0.0:7512/docs
 - 健康检查：http://0.0.0.0:7512/llm/
+
+### 一键启动
+
+项目提供了两个平台对应的启动脚本：
+
+| 脚本 | 平台 |
+|------|------|
+| `start-mac.sh` | macOS / Linux |
+| `start-win.bat` | Windows |
+
+脚本自动完成以下启动流程：
+1. 读取 conda 环境名称（优先级：命令行参数 > 系统环境变量 `GEORAG_CONDA_ENV` > 项目 `.env` 文件 > 默认值 `langchain_v03`）
+2. 自动定位 conda 并激活对应环境
+3. 检查项目依赖是否完整（缺失时自动安装）
+4. 当 `USE_PGVECTOR=true` 时自动检查并启动 Pgvector 数据库容器
+5. 启动服务并自动打开浏览器访问 API 文档
+
+**配置环境名称** —— 在本地 `.env` 中增加配置（`.env` 已被 git 忽略，不会入库）：
+
+```bash
+# .env
+GEORAG_CONDA_ENV=langchain_v03
+```
+
+或设置为系统环境变量：
+
+```bash
+# macOS / Linux
+echo 'export GEORAG_CONDA_ENV=langchain_v03' >> ~/.zshrc && source ~/.zshrc
+
+# Windows（执行一次）
+setx GEORAG_CONDA_ENV langchain_v03
+```
+
+**启动：**
+
+```bash
+# macOS / Linux
+./start-mac.sh
+
+# Windows（双击或在 cmd 中运行）
+start-win.bat
+```
+
+两个脚本均支持可选参数：
+- `<env_name>` —— 临时指定其他 conda 环境启动
+- `--skip-db` —— 跳过 Pgvector 数据库检查/启动
 
 ## 使用说明
 

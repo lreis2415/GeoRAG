@@ -43,6 +43,10 @@ export DEFAULT_EMBEDDING_MODEL=text-embedding-v4
 export JWT_PUBLIC_KEY_PATH=.secrets/jwt/public.pem
 export AUTH_ENABLED=true
 
+# One-click launcher (start-mac.sh / start-win.bat): conda environment name.
+# Leave unset to use the script's default (langchain_v03).
+export GEORAG_CONDA_ENV=langchain_v03
+
 # Local debugging only: bypass JWT and use a fixed synthetic user identity.
 # export AUTH_ENABLED=false
 # export AUTH_DEBUG_USER_ID=local-debug-user
@@ -89,6 +93,53 @@ After the service starts:
 - Service URL: http://0.0.0.0:7512
 - API Docs: http://0.0.0.0:7512/docs
 - Health Check: http://0.0.0.0:7512/llm/
+
+### One-Click Launch
+
+Repository ships with two launcher scripts (per platform):
+
+| Script | Platform |
+|--------|----------|
+| `start-mac.sh` | macOS / Linux |
+| `start-win.bat` | Windows |
+
+The scripts automate the whole startup flow:
+1. Read the conda environment name (priority: CLI argument > `GEORAG_CONDA_ENV` env var > project `.env` file > default `langchain_v03`)
+2. Locate conda automatically and activate the environment
+3. Check that project dependencies are installed (auto-install if missing)
+4. Optionally start the Pgvector database container when `USE_PGVECTOR=true`
+5. Start the service and open the API docs in your browser
+
+**Configure the environment name** — add it to your local `.env` (ignored by git, never committed):
+
+```bash
+# .env
+GEORAG_CONDA_ENV=langchain_v03
+```
+
+Or set it as a system environment variable:
+
+```bash
+# macOS / Linux
+echo 'export GEORAG_CONDA_ENV=langchain_v03' >> ~/.zshrc && source ~/.zshrc
+
+# Windows (run once)
+setx GEORAG_CONDA_ENV langchain_v03
+```
+
+**Run:**
+
+```bash
+# macOS / Linux
+./start-mac.sh
+
+# Windows (double-click or in cmd)
+start-win.bat
+```
+
+Optional arguments (both scripts):
+- `<env_name>` — temporarily launch with another conda environment
+- `--skip-db` — skip the Pgvector database check/startup
 
 ### Local Debug Authentication
 
