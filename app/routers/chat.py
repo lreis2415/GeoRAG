@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.dependencies import CurrentUser, get_current_user, http_bearer
 from app.dao.chat_dao import ChatDAO
+from app.services.db import SessionLocal
 from app.utils.config import config
 from app.utils.dependencies import (
     get_chat_service,
@@ -22,7 +23,7 @@ from app.utils.dependencies import (
     get_mcp_service,
     get_model_service,
 )
-from app.services.db import SessionLocal
+from app.utils.errors import safe_error_message
 from app.utils.models import (
     ChatHistoryResponse,
     ChatInitResponse,
@@ -71,7 +72,7 @@ async def chat_with_agent(
         )
         if not model_service.validate_chat_model(chat_model_name):
             return error_response(
-                message=f"聊天模型 '{chat_model_name}' 不可用", code=4000
+                message=f"Chat model '{chat_model_name}' is not available", code=4000
             )
 
         # 处理会话和记忆
@@ -82,14 +83,18 @@ async def chat_with_agent(
             # 检查是否提供了session_id
             if not request.session_id:
                 return error_response(
-                    message="使用记忆功能时必须提供session_id", code=4000
+                    message="session_id is required when use_memory is enabled",
+                    code=4000,
                 )
 
             # 验证会话是否存在
             if not chat_service.session_exists(
                 request.session_id, db=db, user_id=current_user.user_id
             ):
-                return error_response(message="会话不存在，请先创建会话", code=4004)
+                return error_response(
+                    message="Session does not exist. Please create a session first.",
+                    code=4004,
+                )
 
             # 获取历史对话
             session_id = request.session_id
@@ -207,7 +212,7 @@ async def chat_with_agent(
             request_id,
             config.MCP_AGENT_TIMEOUT_SECONDS,
         )
-        return error_response(message="聊天调用超时", code=5010)
+        return error_response(message="Chat request timed out", code=5010)
     except asyncio.CancelledError as e:
         if run_created:
             chat_dao.finish_chat_run(
@@ -242,7 +247,9 @@ async def chat_with_agent(
                 user_id=current_user.user_id,
             )
         logger.exception("聊天处理异常: request_id=%s", request_id)
-        return error_response(message=str(e), code=5010)
+        return error_response(
+            message=safe_error_message(e, fallback="Chat request failed"), code=5010
+        )
 
 
 @router.get(
@@ -272,7 +279,10 @@ async def init_chat_service(
         )
     except Exception as e:
         logger.error(f"创建会话错误: {e}")
-        return error_response(message=f"无法初始化聊天服务: {str(e)}", code=5015)
+        return error_response(
+            message=f"Failed to initialize chat service: {safe_error_message(e)}",
+            code=5015,
+        )
 
 
 @router.get(
@@ -301,7 +311,9 @@ async def get_chat_sessions(
         return success_response(data={"sessions": sessions_list})
     except Exception as e:
         logger.error(f"获取会话信息失败: {e}")
-        return error_response(message=f"无法获取会话信息: {str(e)}", code=5011)
+        return error_response(
+            message=f"Failed to fetch chat sessions: {safe_error_message(e)}", code=5011
+        )
 
 
 @router.delete(
@@ -330,12 +342,14 @@ async def delete_chat_session(
         )
 
         if not memory_deleted and not db_deleted:
-            return error_response(message="会话未找到", code=4004)
+            return error_response(message="Session not found", code=4004)
 
         return success_response(message="会话已删除")
     except Exception as e:
         logger.error(f"删除会话失败: {e}")
-        return error_response(message=f"无法删除会话: {str(e)}", code=5012)
+        return error_response(
+            message=f"Failed to delete chat session: {safe_error_message(e)}", code=5012
+        )
 
 
 @router.post(
@@ -359,7 +373,9 @@ async def clear_all_sessions(
         return success_response(message="所有会话已清空")
     except Exception as e:
         logger.error(f"清空会话失败: {e}")
-        return error_response(message=f"无法清空会话: {str(e)}", code=5013)
+        return error_response(
+            message=f"Failed to clear chat sessions: {safe_error_message(e)}", code=5013
+        )
 
 
 @router.get(
@@ -405,9 +421,7 @@ async def _get_chat_history_internal(
 
         created_at = session_info.get("created_at")
         title = session_info.get("title") or "New Chat"
-        full_history = chat_dao.get_session_history(
-            db, session_id, user_id=user_id
-        )
+        full_history = chat_dao.get_session_history(db, session_id, user_id=user_id)
         paged_messages = full_history[offset : offset + limit]
 
         messages = []
@@ -445,4 +459,6 @@ async def _get_chat_history_internal(
         return error_response(message=str(e), code=4000)
     except Exception as e:
         logger.error(f"获取历史记录失败: {e}")
-        return error_response(message=f"无法获取历史记录: {str(e)}", code=5014)
+        return error_response(
+            message=f"Failed to fetch chat history: {safe_error_message(e)}", code=5014
+        )

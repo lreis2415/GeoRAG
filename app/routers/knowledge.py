@@ -27,6 +27,7 @@ from app.utils.dependencies import (
     get_model_service,
     get_rag_service,
 )
+from app.utils.errors import safe_error_message
 from app.utils.models import StandardResponse
 from app.utils.response import error_response, success_response
 
@@ -62,7 +63,7 @@ async def get_knowledge_bases(
         )
         return success_response(data=data.model_dump())
     except Exception as e:
-        return error_response(message=str(e), code=5002)
+        return error_response(message=safe_error_message(e), code=5002)
 
 
 @router.get(
@@ -85,10 +86,12 @@ async def get_knowledge_base_detail(
             db_name, user_id=current_user.user_id
         )
         if not info:
-            return error_response(message=f"知识库 '{db_name}' 未找到", code=4004)
+            return error_response(
+                message=f"Knowledge base '{db_name}' not found", code=4004
+            )
         return success_response(data=info)
     except Exception as e:
-        return error_response(message=str(e), code=5002)
+        return error_response(message=safe_error_message(e), code=5002)
 
 
 @router.post(
@@ -122,7 +125,9 @@ async def create_knowledge_base(
     """
     try:
         if not model_service.validate_embedding_model(model_name):
-            return error_response(message=f"嵌入模型 '{model_name}' 不可用", code=4000)
+            return error_response(
+                message=f"Embedding model '{model_name}' is not available", code=4000
+            )
 
         result = database_service.create_database(
             model_name, db_name, files, user_id=current_user.user_id
@@ -131,7 +136,7 @@ async def create_knowledge_base(
     except ValueError as e:
         return error_response(message=str(e), code=4000)
     except Exception as e:
-        return error_response(message=str(e), code=5008)
+        return error_response(message=safe_error_message(e), code=5008)
 
 
 @router.delete(
@@ -153,14 +158,12 @@ async def delete_knowledge_base(
     - 若知识库不存在，返回 `code=4004`。
     """
     try:
-        result = database_service.delete_database(
-            db_name, user_id=current_user.user_id
-        )
+        result = database_service.delete_database(db_name, user_id=current_user.user_id)
         return success_response(data=result, message="知识库删除成功")
     except ValueError as e:
         return error_response(message=str(e), code=4004)
     except Exception as e:
-        return error_response(message=str(e), code=5004)
+        return error_response(message=safe_error_message(e), code=5004)
 
 
 @router.patch(
@@ -192,7 +195,7 @@ async def update_knowledge_base(
     except ValueError as e:
         return error_response(message=str(e), code=4004)
     except Exception as e:
-        return error_response(message=str(e), code=5002)
+        return error_response(message=safe_error_message(e), code=5002)
 
 
 @router.post(
@@ -227,7 +230,7 @@ async def add_files_to_knowledge_base(
     except ValueError as e:
         return error_response(message=str(e), code=4000)
     except Exception as e:
-        return error_response(message=str(e), code=5003)
+        return error_response(message=safe_error_message(e), code=5003)
 
 
 @router.get(
@@ -251,7 +254,9 @@ async def get_knowledge_base_files(
             db_name, user_id=current_user.user_id
         )
         if not info:
-            return error_response(message=f"知识库 '{db_name}' 未找到", code=4004)
+            return error_response(
+                message=f"Knowledge base '{db_name}' not found", code=4004
+            )
 
         files = database_service.get_knowledge_base_files(
             db_name, user_id=current_user.user_id
@@ -266,7 +271,7 @@ async def get_knowledge_base_files(
     except ValueError as e:
         return error_response(message=str(e), code=4000)
     except Exception as e:
-        return error_response(message=str(e), code=5003)
+        return error_response(message=safe_error_message(e), code=5003)
 
 
 # ==================== 知识文件管理 ====================
@@ -290,7 +295,7 @@ async def list_knowledge_files(
         documents = document_service.get_documents(current_user.user_id)
         return success_response(data=documents)
     except Exception:
-        return error_response(message="无法列出文档", code=5005)
+        return error_response(message="Failed to list documents", code=5005)
 
 
 @router.get(
@@ -320,7 +325,7 @@ async def download_knowledge_file(
     except FileNotFoundError as e:
         return error_response(message=str(e), code=4004)
     except Exception:
-        return error_response(message="无法下载文档", code=5006)
+        return error_response(message="Failed to download document", code=5006)
 
 
 @router.delete(
@@ -344,7 +349,7 @@ async def delete_knowledge_file(
     except ValueError as e:
         return error_response(message=str(e), code=4004)
     except Exception:
-        return error_response(message="无法删除文档", code=5007)
+        return error_response(message="Failed to delete document", code=5007)
 
 
 # ==================== 知识库问答 ====================
@@ -382,7 +387,7 @@ async def ask_knowledge_base(
         )
         if not model_service.validate_chat_model(chat_model_name):
             return error_response(
-                message=f"聊天模型 '{chat_model_name}' 不可用", code=4000
+                message=f"Chat model '{chat_model_name}' is not available", code=4000
             )
 
         vector_db = database_service.get_vector_db(
@@ -390,7 +395,7 @@ async def ask_knowledge_base(
         )
         if not vector_db:
             return error_response(
-                message=f"知识库 '{request.db_name}' 未找到", code=4004
+                message=f"Knowledge base '{request.db_name}' not found", code=4004
             )
 
         result = rag_service.ask_question(
@@ -403,4 +408,4 @@ async def ask_knowledge_base(
     except ValueError as e:
         return error_response(message=str(e), code=4000)
     except Exception as e:
-        return error_response(message=str(e), code=5009)
+        return error_response(message=safe_error_message(e), code=5009)

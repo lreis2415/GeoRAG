@@ -202,9 +202,7 @@ def _get_all_databases_chromadb(user_id: Optional[str] = None) -> List[Dict]:
     return databases
 
 
-def get_database_info(
-    db_name: str, user_id: Optional[str] = None
-) -> Optional[Dict]:
+def get_database_info(db_name: str, user_id: Optional[str] = None) -> Optional[Dict]:
     """
     获取单个知识库详细信息
 
@@ -353,9 +351,7 @@ def _get_database_info_chromadb(
     }
 
 
-def get_database_files(
-    db_name: str, user_id: Optional[str] = None
-) -> List[Dict]:
+def get_database_files(db_name: str, user_id: Optional[str] = None) -> List[Dict]:
     """
     获取知识库关联的文件列表
 
@@ -411,9 +407,11 @@ def get_database_files(
     for filename in files:
         file_path = os.path.join(
             documents_dir,
-            hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
-            if user_id
-            else "legacy",
+            (
+                hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
+                if user_id
+                else "legacy"
+            ),
             filename,
         )
         if os.path.exists(file_path):
@@ -463,9 +461,7 @@ def delete_database(db_name: str, user_id: Optional[str] = None) -> bool:
         return False
 
 
-def save_uploaded_file(
-    file, filename: str, user_id: Optional[str] = None
-) -> str:
+def save_uploaded_file(file, filename: str, user_id: Optional[str] = None) -> str:
     """保存上传的文件到documents目录"""
     user_directory = (
         hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:16]
@@ -503,7 +499,8 @@ def create_db(
     # 验证必要的环境变量
     if not embedding_api_url:
         raise ValueError(
-            "未设置 EMBEDDING_API_URL 环境变量，请在 .env 文件中设置该变量"
+            "EMBEDDING_API_URL environment variable is not set. "
+            "Please configure it in the .env file."
         )
 
     # 确定是否使用 pgvector
@@ -521,7 +518,7 @@ def create_db(
 
                 db_url = os.environ.get("DB_URL")
                 if not db_url:
-                    raise ValueError("未设置 DB_URL 环境变量")
+                    raise ValueError("DB_URL environment variable is not set")
 
                 vector_db = PgvectorVectorDB(
                     connection_string=db_url,
@@ -539,7 +536,7 @@ def create_db(
                     user_id=user_id,
                 )
         except Exception as e:
-            raise ValueError(f"创建向量数据库失败: {str(e)}")
+            raise ValueError(f"Failed to create vector database: {str(e)}")
 
     # 如果提供了文件路径，则嵌入这些文件
     should_embed = (
@@ -549,7 +546,7 @@ def create_db(
         try:
             for file_path in file_paths:
                 if not os.path.exists(file_path):
-                    raise ValueError(f"文件不存在: {file_path}")
+                    raise ValueError(f"File not found: {file_path}")
 
                 if file_path.endswith(".csv"):
                     vector_db.embed_csv(file_path)
@@ -560,9 +557,9 @@ def create_db(
                 elif file_path.startswith("http"):
                     vector_db.embed_webpage(file_path)
                 else:
-                    raise ValueError(f"不支持的文件类型: {file_path}")
+                    raise ValueError(f"Unsupported file type: {file_path}")
         except Exception as e:
-            raise ValueError(f"嵌入文件失败: {str(e)}")
+            raise ValueError(f"Failed to embed file: {str(e)}")
 
     # 确保数据库目录存在：即使没有文件，列表接口也能看到该数据库（仅 ChromaDB）
     if not use_pgvector and not os.path.exists(persist_directory):
@@ -593,7 +590,7 @@ def create_db(
     except Exception as e:
         # 元数据是空知识库在 pgvector 中的唯一可见记录。继续返回“创建成功”
         # 会产生无法在列表中查询到的幽灵知识库，因此必须将失败交给调用方。
-        raise ValueError(f"保存知识库元数据失败: {e}") from e
+        raise ValueError(f"Failed to save knowledge base metadata: {e}") from e
 
     return vector_db
 

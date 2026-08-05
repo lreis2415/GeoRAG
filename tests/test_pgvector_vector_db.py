@@ -47,6 +47,6 @@ def test_metadata_update_fails_when_pgvector_did_not_create_collection(monkeypat
     try:
         vector_db.update_collection_metadata({"name": "missing_kb"})
     except RuntimeError as exc:
-        assert "未创建" in str(exc)
+        assert "has not been created" in str(exc)
     else:
         raise AssertionError("Expected metadata update to fail")

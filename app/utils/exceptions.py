@@ -27,7 +27,7 @@ async def file_not_found_exception_handler(request: Request, exc: FileNotFoundEr
     """处理FileNotFoundError异常"""
     logger.warning(f"FileNotFoundError: {str(exc)}")
     return JSONResponse(
-        status_code=404, content=error_response(message="文件未找到", code=4004)
+        status_code=404, content=error_response(message="File not found", code=4004)
     )
 
 
@@ -58,7 +58,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return JSONResponse(
         status_code=422,
         content=error_response(
-            message="请求参数验证失败", code=4220, data=serializable_errors
+            message="Request parameter validation failed",
+            code=4220,
+            data=serializable_errors,
         ),
     )
 
@@ -67,7 +69,8 @@ async def general_exception_handler(request: Request, exc: Exception):
     """处理所有其他异常"""
     logger.error(f"未处理的异常: {type(exc).__name__}: {str(exc)}")
     return JSONResponse(
-        status_code=500, content=error_response(message="服务器内部错误", code=5000)
+        status_code=500,
+        content=error_response(message="Internal server error", code=5000),
     )
 
 

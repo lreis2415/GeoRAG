@@ -26,7 +26,7 @@ def success_response(data: Any = None, message: str = "成功", code: int = None
     return StandardResponse(success=True, code=code, message=message, data=data).dict()
 
 
-def error_response(message: str = "失败", code: int = None, data: Any = None) -> Dict:
+def error_response(message: str = "Error", code: int = None, data: Any = None) -> Dict:
     """
     创建错误响应
 

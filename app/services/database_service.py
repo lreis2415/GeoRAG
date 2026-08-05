@@ -17,8 +17,8 @@ from app.dao.DataBase import (
     get_all_databases,
     get_database_files,
     get_database_info,
-    get_scoped_db_name,
     get_persist_directory,
+    get_scoped_db_name,
     save_uploaded_file,
 )
 
@@ -159,8 +159,10 @@ class DatabaseService(BaseService):
 
         try:
             # 创建数据库
-            self.vector_dbs[self._cache_key(user_id, db_name)] = create_db(  # noqa: E501
-                model_name, db_name, file_paths, user_id=user_id
+            self.vector_dbs[self._cache_key(user_id, db_name)] = (
+                create_db(  # noqa: E501
+                    model_name, db_name, file_paths, user_id=user_id
+                )
             )
             self.log_info(f"成功创建数据库: {db_name}")
 
@@ -203,9 +205,10 @@ class DatabaseService(BaseService):
 
         # 存在性检查：内存缓存命中视为已知存在，否则查持久化存储
         cache_key = self._cache_key(user_id, db_name)
-        if cache_key not in self.vector_dbs and get_database_info(
-            db_name, user_id=user_id
-        ) is None:
+        if (
+            cache_key not in self.vector_dbs
+            and get_database_info(db_name, user_id=user_id) is None
+        ):
             raise ValueError(f"Database '{db_name}' not found")
 
         # 处理上传的文件
@@ -226,7 +229,7 @@ class DatabaseService(BaseService):
             # 获取（或加载）向量数据库实例
             vector_db = self.get_vector_db(db_name, user_id=user_id)
             if vector_db is None:
-                raise ValueError(f"无法加载数据库 '{db_name}'")
+                raise ValueError(f"Failed to load database '{db_name}'")
 
             vector_db.add_files(file_paths)
             self.log_info(f"成功向数据库 {db_name} 添加 {len(file_paths)} 个文件")

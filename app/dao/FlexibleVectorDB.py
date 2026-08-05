@@ -17,10 +17,11 @@ class CustomEmbeddings(Embeddings):
     def __init__(self, api_url: str, model_name: str):
         if not api_url:
             raise ValueError(
-                "api_url 不能为空，请确保设置了 EMBEDDING_API_URL 环境变量"
+                "api_url must not be empty. Please make sure the EMBEDDING_API_URL "
+                "environment variable is set."
             )
         if not model_name:
-            raise ValueError("model_name 不能为空")
+            raise ValueError("model_name must not be empty")
 
         self.api_url = api_url
         self.model_name = model_name
@@ -29,7 +30,10 @@ class CustomEmbeddings(Embeddings):
         load_dotenv()
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
-            raise ValueError("未找到 OPENAI_API_KEY 环境变量，请确保已正确设置")
+            raise ValueError(
+                "OPENAI_API_KEY environment variable not found. "
+                "Please make sure it is configured."
+            )
 
         try:
             self.client = OpenAI(api_key=api_key, base_url=api_url)
@@ -38,7 +42,7 @@ class CustomEmbeddings(Embeddings):
             print(f"   API URL: {api_url}")
             print(f"   模型名称: {model_name}")
         except Exception as e:
-            raise ValueError(f"OpenAI 客户端初始化失败: {str(e)}")
+            raise ValueError(f"Failed to initialize OpenAI client: {str(e)}")
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """实现文档嵌入方法"""
@@ -70,7 +74,7 @@ class CustomEmbeddings(Embeddings):
             return all_embeddings
 
         except Exception as e:
-            error_msg = f"嵌入 API 调用失败: {str(e)}"
+            error_msg = f"Embedding API call failed: {str(e)}"
             print(f"❌ {error_msg}")
             # 打印更多调试信息
             print(f"   模型名称: {self.model_name}")
@@ -113,12 +117,13 @@ class FlexibleVectorDB(VectorDB):
         # 验证必要参数
         if not embedding_api_url:
             raise ValueError(
-                "embedding_api_url 不能为空，请确保设置了 EMBEDDING_API_URL 环境变量"
+                "embedding_api_url must not be empty. Please make sure the "
+                "EMBEDDING_API_URL environment variable is set."
             )
         if not model_name:
-            raise ValueError("model_name 不能为空")
+            raise ValueError("model_name must not be empty")
         if not persist_directory:
-            raise ValueError("persist_directory 不能为空")
+            raise ValueError("persist_directory must not be empty")
 
         self._embedding_api_url = embedding_api_url
         self._model_name = model_name
@@ -134,7 +139,7 @@ class FlexibleVectorDB(VectorDB):
         try:
             self._embeddings = CustomEmbeddings(embedding_api_url, model_name)
         except Exception as e:
-            raise ValueError(f"初始化嵌入函数失败: {str(e)}")
+            raise ValueError(f"Failed to initialize embedding function: {str(e)}")
 
     def get_vector_store(self):
         """获取向量存储"""
@@ -196,7 +201,7 @@ class FlexibleVectorDB(VectorDB):
 
             # 检查文件是否存在
             if not os.path.exists(file_path):
-                raise FileNotFoundError(f"文件不存在: {file_path}")
+                raise FileNotFoundError(f"File not found: {file_path}")
 
             # 获取文件大小
             file_size = os.path.getsize(file_path)
@@ -227,7 +232,7 @@ class FlexibleVectorDB(VectorDB):
             print(f"✅ TXT 文件处理完成: {file_path}")
 
         except Exception as e:
-            error_msg = f"处理 TXT 文件失败 {file_path}: {str(e)}"
+            error_msg = f"Failed to process TXT file {file_path}: {str(e)}"
             print(f"❌ {error_msg}")
             raise Exception(error_msg)
 
@@ -296,7 +301,7 @@ class FlexibleVectorDB(VectorDB):
                 json.dump(metadata, f, ensure_ascii=False, indent=2)
             print(f"✅ 集合元数据已更新: {metadata_file}")
         except Exception as e:
-            raise RuntimeError(f"更新集合元数据失败: {str(e)}")
+            raise RuntimeError(f"Failed to update collection metadata: {str(e)}")
 
     def add_files(self, file_paths: List[str]) -> None:
         """
@@ -308,7 +313,7 @@ class FlexibleVectorDB(VectorDB):
         try:
             for file_path in file_paths:
                 if not os.path.exists(file_path):
-                    raise ValueError(f"文件不存在: {file_path}")
+                    raise ValueError(f"File not found: {file_path}")
 
                 if file_path.endswith(".csv"):
                     self.embed_csv(file_path)
@@ -319,7 +324,7 @@ class FlexibleVectorDB(VectorDB):
                 elif file_path.startswith("http"):
                     self.embed_webpage(file_path)
                 else:
-                    raise ValueError(f"不支持的文件类型: {file_path}")
+                    raise ValueError(f"Unsupported file type: {file_path}")
 
             # 更新元数据中的文档数量和文件列表
             metadata = self.get_collection_metadata() or {}
@@ -334,4 +339,4 @@ class FlexibleVectorDB(VectorDB):
             self.update_collection_metadata(metadata)
 
         except Exception as e:
-            raise RuntimeError(f"添加文件失败: {str(e)}")
+            raise RuntimeError(f"Failed to add file: {str(e)}")

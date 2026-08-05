@@ -647,7 +647,7 @@ async def test_chat_with_agent_db_not_found(service_with_db, mock_database_servi
             use_memory=False,
         )
 
-    assert "知识库 'nonexistent_db' 未找到" in str(exc_info.value)
+    assert "Knowledge base 'nonexistent_db' not found" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -664,7 +664,7 @@ async def test_chat_with_agent_db_service_not_initialized(service):
             use_memory=False,
         )
 
-    assert "DatabaseService 未初始化" in str(exc_info.value)
+    assert "DatabaseService is not initialized" in str(exc_info.value)
 
 
 @pytest.mark.asyncio

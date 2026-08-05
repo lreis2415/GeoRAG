@@ -150,9 +150,7 @@ class ChatService(BaseService):
             return existing_title
 
         generated_title = self.generate_session_title(query)
-        self.dao.update_session_title(
-            db, session_id, generated_title, user_id=user_id
-        )
+        self.dao.update_session_title(db, session_id, generated_title, user_id=user_id)
         return generated_title
 
     def _cleanup_old_sessions(self):
@@ -171,9 +169,7 @@ class ChatService(BaseService):
             del self.chat_sessions[session_id]
             self.log_info(f"清理旧会话: {session_id}")
 
-    def update_session_activity(
-        self, session_id: str, user_id: Optional[str] = None
-    ):
+    def update_session_activity(self, session_id: str, user_id: Optional[str] = None):
         """
         更新会话活跃时间
 
@@ -254,9 +250,7 @@ class ChatService(BaseService):
 
         try:
             history = []
-            db_messages = self.dao.get_session_history(
-                db, session_id, user_id=user_id
-            )
+            db_messages = self.dao.get_session_history(db, session_id, user_id=user_id)
 
             for msg in db_messages:
                 role = msg.get("role", "").lower()
@@ -566,13 +560,16 @@ class ChatService(BaseService):
             # 2. 如果提供了 db_name，添加检索工具
             if db_name:
                 if not self._database_service:
-                    raise ValueError("DatabaseService 未初始化，无法使用向量数据库")
+                    raise ValueError(
+                        "DatabaseService is not initialized; vector database is "
+                        "unavailable"
+                    )
 
                 vector_db = self._database_service.get_vector_db(
                     db_name, user_id=user_id
                 )
                 if not vector_db:
-                    raise ValueError(f"知识库 '{db_name}' 未找到")
+                    raise ValueError(f"Knowledge base '{db_name}' not found")
 
                 # 创建检索工具
                 vector_store = vector_db.get_vector_store()

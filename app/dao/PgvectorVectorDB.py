@@ -45,14 +45,18 @@ class PgvectorVectorDB(VectorDB):
         """
         # 验证必要参数
         if not connection_string:
-            raise ValueError("connection_string 不能为空，请确保设置了 DB_URL 环境变量")
+            raise ValueError(
+                "connection_string must not be empty. Please make sure the "
+                "DB_URL environment variable is set."
+            )
         if not db_name:
-            raise ValueError("db_name 不能为空")
+            raise ValueError("db_name must not be empty")
         if not model_name:
-            raise ValueError("model_name 不能为空")
+            raise ValueError("model_name must not be empty")
         if not embedding_api_url:
             raise ValueError(
-                "embedding_api_url 不能为空，请确保设置了 EMBEDDING_API_URL 环境变量"
+                "embedding_api_url must not be empty. Please make sure the "
+                "EMBEDDING_API_URL environment variable is set."
             )
 
         self._connection_string = connection_string
@@ -72,7 +76,7 @@ class PgvectorVectorDB(VectorDB):
             print(f"   数据库: {db_name}")
             print(f"   模型: {model_name}")
         except Exception as e:
-            raise ValueError(f"初始化嵌入函数失败: {str(e)}")
+            raise ValueError(f"Failed to initialize embedding function: {str(e)}")
 
     def get_vector_store(self):
         """
@@ -93,7 +97,7 @@ class PgvectorVectorDB(VectorDB):
             print(f"✅ PGVector 实例创建成功: {self._db_name}")
             return vector_store
         except Exception as e:
-            raise RuntimeError(f"创建 PGVector 实例失败: {str(e)}")
+            raise RuntimeError(f"Failed to create PGVector instance: {str(e)}")
 
     def embed_documents(self, documents: List[Document], batch_size: int = 10) -> None:
         """
@@ -122,7 +126,7 @@ class PgvectorVectorDB(VectorDB):
 
             print("✅ 所有文档嵌入完成")
         except Exception as e:
-            raise RuntimeError(f"文档嵌入失败: {str(e)}")
+            raise RuntimeError(f"Failed to embed documents: {str(e)}")
 
     def embed_csv(self, file_path: str) -> None:
         """嵌入 CSV 文件"""
@@ -156,7 +160,7 @@ class PgvectorVectorDB(VectorDB):
             print(f"📄 开始处理 TXT 文件: {file_path}")
 
             if not os.path.exists(file_path):
-                raise FileNotFoundError(f"文件不存在: {file_path}")
+                raise FileNotFoundError(f"File not found: {file_path}")
 
             from langchain.text_splitter import RecursiveCharacterTextSplitter
             from langchain_community.document_loaders import TextLoader
@@ -176,7 +180,7 @@ class PgvectorVectorDB(VectorDB):
             print(f"✅ TXT 文件处理完成: {file_path}")
 
         except Exception as e:
-            raise RuntimeError(f"处理 TXT 文件失败 {file_path}: {str(e)}")
+            raise RuntimeError(f"Failed to process TXT file {file_path}: {str(e)}")
 
     def embed_webpage(self, url: str) -> None:
         """嵌入网页"""
@@ -197,7 +201,7 @@ class PgvectorVectorDB(VectorDB):
             vector_store.delete_collection()
             print(f"✅ 集合 {self._db_name} 已删除")
         except Exception as e:
-            raise RuntimeError(f"删除集合失败: {str(e)}")
+            raise RuntimeError(f"Failed to delete collection: {str(e)}")
 
     def get_document_count(self) -> int:
         """
@@ -293,10 +297,12 @@ class PgvectorVectorDB(VectorDB):
                     },
                 )
                 if result.rowcount != 1:
-                    raise RuntimeError(f"集合 '{self._db_name}' 未创建")
+                    raise RuntimeError(
+                        f"Collection '{self._db_name}' has not been created"
+                    )
             print(f"✅ 集合 {self._db_name} 元数据已更新")
         except Exception as e:
-            raise RuntimeError(f"更新集合元数据失败: {str(e)}")
+            raise RuntimeError(f"Failed to update collection metadata: {str(e)}")
 
     def add_files(self, file_paths: List[str]) -> None:
         """
@@ -308,7 +314,7 @@ class PgvectorVectorDB(VectorDB):
         try:
             for file_path in file_paths:
                 if not os.path.exists(file_path):
-                    raise ValueError(f"文件不存在: {file_path}")
+                    raise ValueError(f"File not found: {file_path}")
 
                 if file_path.endswith(".csv"):
                     self.embed_csv(file_path)
@@ -319,7 +325,7 @@ class PgvectorVectorDB(VectorDB):
                 elif file_path.startswith("http"):
                     self.embed_webpage(file_path)
                 else:
-                    raise ValueError(f"不支持的文件类型: {file_path}")
+                    raise ValueError(f"Unsupported file type: {file_path}")
 
             # 更新元数据中的文档数量和文件列表
             metadata = self.get_collection_metadata() or {}
@@ -334,4 +340,4 @@ class PgvectorVectorDB(VectorDB):
             self.update_collection_metadata(metadata)
 
         except Exception as e:
-            raise RuntimeError(f"添加文件失败: {str(e)}")
+            raise RuntimeError(f"Failed to add file: {str(e)}")
