@@ -4,12 +4,14 @@
 """
 
 import asyncio
+import json
 import logging
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, Query, Security
+from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -249,6 +251,257 @@ async def chat_with_agent(
         logger.exception("聊天处理异常: request_id=%s", request_id)
         return error_response(
             message=safe_error_message(e, fallback="Chat request failed"), code=5010
+        )
+
+
+def _sse_payload(event: Dict) -> str:
+    """将事件序列化为 SSE data 帧。"""
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+@router.post("/chat/stream", tags=["聊天对话"])
+async def chat_stream(
+    request: ChatRequest,
+    credentials: HTTPAuthorizationCredentials = Security(http_bearer),
+    current_user: CurrentUser = Depends(get_current_user),
+    chat_service: ChatService = Depends(get_chat_service),
+    model_service: ModelService = Depends(get_model_service),
+    mcp_service: MCPService = Depends(get_mcp_service),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """
+    聊天对话（SSE 流式）— 支持记忆、向量数据库 RAG 和 MCP 工具
+
+    事件格式：
+        data: {"type": "text", "content": "..."}    增量文本
+        data: {"type": "tool", "name": "..."}      工具调用
+        data: {"type": "done", "response": "...",
+               "session_id": "...", "message_count": n}  结束
+        data: {"type": "error", "code": ..., "message": "..."}  错误
+    """
+    request_id = uuid.uuid4().hex
+    started_at = datetime.now()
+    run_created = False
+    session_id = None
+    history = None
+
+    # 验证聊天模型是否存在
+    chat_model_name = request.chat_model_name or model_service.get_default_chat_model()
+    if not model_service.validate_chat_model(chat_model_name):
+        return error_response(message=f"聊天模型 '{chat_model_name}' 不可用", code=4000)
+
+    try:
+        # 处理会话和记忆
+        if request.use_memory:
+            # 检查是否提供了session_id
+            if not request.session_id:
+                return error_response(
+                    message="使用记忆功能时必须提供session_id", code=4000
+                )
+
+            # 验证会话是否存在
+            if not chat_service.session_exists(
+                request.session_id, db=db, user_id=current_user.user_id
+            ):
+                return error_response(message="会话不存在，请先创建会话", code=4004)
+
+            # 获取历史对话
+            session_id = request.session_id
+            chat_service.update_session_activity(session_id, current_user.user_id)
+            history = chat_service.get_conversation_history(
+                session_id, db=db, user_id=current_user.user_id
+            )
+
+            # 保存会话到数据库
+            if session_id:
+                chat_dao.save_session(db, session_id, user_id=current_user.user_id)
+
+        # 先落库用户消息和运行状态
+        user_message_id = None
+        if request.use_memory and session_id:
+            user_message_id = chat_dao.save_message(
+                db,
+                session_id,
+                "user",
+                request.query,
+                user_id=current_user.user_id,
+            )
+        chat_dao.create_chat_run(
+            db,
+            request_id,
+            session_id,
+            user_message_id,
+            user_id=current_user.user_id,
+        )
+        run_created = True
+        logger.info(
+            "流式聊天请求已开始: request_id=%s session_id=%s use_memory=%s",
+            request_id,
+            session_id,
+            request.use_memory,
+        )
+
+        # 获取 MCP 工具（使用依赖注入的服务，已在应用启动时初始化）
+        mcp_tools = []
+        if mcp_service.is_mcp_initialized():
+            token = credentials.credentials if credentials else None
+            if token:
+                mcp_tools = await mcp_service.get_mcp_tools_for_token(token)
+            else:
+                mcp_tools = []
+            if mcp_tools:
+                logger.info(f"MCP 工具列表: {[tool.name for tool in mcp_tools]}")
+
+        timeout_seconds = config.MCP_AGENT_TIMEOUT_SECONDS
+
+        async def event_generator():
+            """SSE 事件生成器：流转 + 结束落库（与 /chat 行为一致）。"""
+            final_response = ""
+            message_count = None
+            terminal_recorded = False
+
+            def record_run(status: str, error: Optional[object] = None):
+                nonlocal terminal_recorded
+                if terminal_recorded:
+                    return
+                terminal_recorded = True
+                chat_dao.finish_chat_run(
+                    db,
+                    request_id,
+                    status,
+                    started_at,
+                    error,
+                    user_id=current_user.user_id,
+                )
+
+            try:
+                iterator = chat_service.chat_stream(
+                    prompt=request.prompt,
+                    query=request.query,
+                    chat_model_name=chat_model_name,
+                    session_id=session_id,
+                    use_memory=request.use_memory,
+                    history=history,
+                    db_name=request.db_name,
+                    mcp_tools=mcp_tools,
+                    request_id=request_id,
+                    db=db,
+                    tool_db_factory=SessionLocal,
+                    timeout_seconds=timeout_seconds,
+                    user_id=current_user.user_id,
+                ).__aiter__()
+
+                while True:
+                    try:
+                        if timeout_seconds is not None:
+                            event = await asyncio.wait_for(
+                                iterator.__anext__(), timeout=timeout_seconds
+                            )
+                        else:
+                            event = await iterator.__anext__()
+                    except StopAsyncIteration:
+                        break
+                    except asyncio.TimeoutError:
+                        record_run("timed_out")
+                        logger.error(
+                            "流式聊天请求超时: request_id=%s timeout_seconds=%s",
+                            request_id,
+                            timeout_seconds,
+                        )
+                        yield _sse_payload(
+                            {"type": "error", "code": 5010, "message": "聊天调用超时"}
+                        )
+                        return
+
+                    if event["type"] == "text":
+                        final_response += event["content"]
+                        yield _sse_payload(event)
+                    elif event["type"] == "tool":
+                        yield _sse_payload(event)
+
+                # 流结束：落库 AI 回复（与 /chat 行为一致）
+                if request.use_memory and session_id:
+                    chat_service.ensure_session_title(
+                        session_id,
+                        request.query,
+                        db,
+                        user_id=current_user.user_id,
+                    )
+                    chat_service.add_to_memory(
+                        session_id,
+                        request.query,
+                        final_response,
+                        db=db,
+                        user_id=current_user.user_id,
+                    )
+                    chat_dao.save_message(
+                        db,
+                        session_id,
+                        "assistant",
+                        final_response,
+                        user_id=current_user.user_id,
+                    )
+                    message_count = (
+                        len(
+                            chat_service.get_conversation_history(
+                                session_id, db=db, user_id=current_user.user_id
+                            )
+                        )
+                        // 2
+                    )
+
+                record_run("succeeded")
+                yield _sse_payload(
+                    {
+                        "type": "done",
+                        "response": final_response,
+                        "session_id": session_id,
+                        "message_count": message_count,
+                    }
+                )
+            except asyncio.CancelledError:
+                record_run("cancelled")
+                logger.warning("流式聊天请求已取消: request_id=%s", request_id)
+                raise
+            except ValueError as e:
+                record_run("failed", e)
+                yield _sse_payload({"type": "error", "code": 4000, "message": str(e)})
+            except Exception as e:
+                record_run("failed", e)
+                logger.exception("流式聊天处理异常: request_id=%s", request_id)
+                yield _sse_payload(
+                    {
+                        "type": "error",
+                        "code": 5010,
+                        "message": safe_error_message(e, fallback="聊天调用失败"),
+                    }
+                )
+            finally:
+                if not terminal_recorded:
+                    record_run("cancelled")
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+    except Exception as e:
+        if run_created:
+            chat_dao.finish_chat_run(
+                db,
+                request_id,
+                "failed",
+                started_at,
+                e,
+                user_id=current_user.user_id,
+            )
+        logger.exception("流式聊天初始化失败: request_id=%s", request_id)
+        return error_response(
+            message=safe_error_message(e, fallback="聊天调用失败"), code=5010
         )
 
 

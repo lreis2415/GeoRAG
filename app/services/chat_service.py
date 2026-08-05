@@ -8,7 +8,7 @@ import os
 import re
 import uuid
 from datetime import datetime
-from typing import Callable, Dict, List, Optional
+from typing import AsyncIterator, Callable, Dict, List, Optional
 
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
@@ -554,64 +554,16 @@ class ChatService(BaseService):
         )
 
         try:
-            # 1. 构建工具列表
-            tools = []
-
-            # 2. 如果提供了 db_name，添加检索工具
-            if db_name:
-                if not self._database_service:
-                    raise ValueError(
-                        "DatabaseService is not initialized; vector database is "
-                        "unavailable"
-                    )
-
-                vector_db = self._database_service.get_vector_db(
-                    db_name, user_id=user_id
-                )
-                if not vector_db:
-                    raise ValueError(f"Knowledge base '{db_name}' not found")
-
-                # 创建检索工具
-                vector_store = vector_db.get_vector_store()
-                retriever = vector_store.as_retriever(
-                    search_type="similarity", search_kwargs={"k": 2}
-                )
-
-                # 将同步检索器包装为异步
-                async def async_retrieve(query: str) -> str:
-                    """异步检索函数"""
-                    docs = retriever.invoke(query)
-                    # 将检索结果格式化为字符串
-                    if docs:
-                        return "\n\n".join(
-                            [
-                                f"【document {i + 1}】\n{doc.page_content}"
-                                for i, doc in enumerate(docs)
-                            ]
-                        )
-                    return "未找到相关信息"
-
-                # 创建异步检索工具
-                retrieval_tool = RunnableLambda(async_retrieve).as_tool(
-                    name="info_retriever",
-                    description="信息检索工具，从知识库中查找相关信息。输入：查询问题，输出：相关文档内容。",
-                )
-                tools.append(retrieval_tool)
-                # self.log_info(f"已添加向量数据库检索工具: {db_name}")
-
-            # 3. 添加 MCP 工具（如果提供）
-            if mcp_tools:
-                tools.extend(mcp_tools)
-
-            # 4. 构建消息列表
-            messages = []
-            messages.append(SystemMessage(content=prompt))
-
-            if use_memory and history:
-                for msg in history:
-                    messages.append(msg)
-
-            messages.append(HumanMessage(content=query))
+            # 1-4. 构建工具列表与消息列表（与 chat_stream 共享）
+            tools, messages = self._build_tools_and_messages(
+                prompt=prompt,
+                query=query,
+                use_memory=use_memory,
+                history=history,
+                db_name=db_name,
+                mcp_tools=mcp_tools,
+                user_id=user_id,
+            )
 
             # 5. 创建并运行 Agent
             if tools:
@@ -655,3 +607,149 @@ class ChatService(BaseService):
         except Exception:
             self.logger.exception("聊天对话失败: request_id=%s", request_id)
             raise
+
+    def _build_tools_and_messages(
+        self,
+        prompt: str,
+        query: str,
+        use_memory: Optional[bool],
+        history: Optional[List],
+        db_name: Optional[str],
+        mcp_tools: Optional[List],
+        user_id: Optional[str],
+    ) -> tuple[List, List]:
+        """构建工具列表与消息列表（chat_with_agent 与 chat_stream 共享）。"""
+        # 1. 构建工具列表
+        tools = []
+
+        # 2. 如果提供了 db_name，添加检索工具
+        if db_name:
+            if not self._database_service:
+                raise ValueError(
+                    "DatabaseService is not initialized; vector database is "
+                    "unavailable"
+                )
+
+            vector_db = self._database_service.get_vector_db(db_name, user_id=user_id)
+            if not vector_db:
+                raise ValueError(f"Knowledge base '{db_name}' not found")
+
+            # 创建检索工具
+            vector_store = vector_db.get_vector_store()
+            retriever = vector_store.as_retriever(
+                search_type="similarity", search_kwargs={"k": 2}
+            )
+
+            # 将同步检索器包装为异步
+            async def async_retrieve(query: str) -> str:
+                """异步检索函数"""
+                docs = retriever.invoke(query)
+                # 将检索结果格式化为字符串
+                if docs:
+                    return "\n\n".join(
+                        [
+                            f"【document {i + 1}】\n{doc.page_content}"
+                            for i, doc in enumerate(docs)
+                        ]
+                    )
+                return "未找到相关信息"
+
+            # 创建异步检索工具
+            retrieval_tool = RunnableLambda(async_retrieve).as_tool(
+                name="info_retriever",
+                description="信息检索工具，从知识库中查找相关信息。输入：查询问题，输出：相关文档内容。",
+            )
+            tools.append(retrieval_tool)
+
+        # 3. 添加 MCP 工具（如果提供）
+        if mcp_tools:
+            tools.extend(mcp_tools)
+
+        # 4. 构建消息列表
+        messages = []
+        messages.append(SystemMessage(content=prompt))
+
+        if use_memory and history:
+            for msg in history:
+                messages.append(msg)
+
+        messages.append(HumanMessage(content=query))
+
+        return tools, messages
+
+    async def chat_stream(
+        self,
+        prompt: str,
+        query: str,
+        chat_model_name: Optional[str] = None,
+        session_id: Optional[str] = None,
+        use_memory: Optional[bool] = True,
+        history: Optional[List] = None,
+        db_name: Optional[str] = None,
+        mcp_tools: Optional[List] = None,
+        request_id: Optional[str] = None,
+        db: Optional[Session] = None,
+        tool_db_factory: Optional[Callable[[], Session]] = None,
+        timeout_seconds: Optional[float] = None,
+        user_id: Optional[str] = None,
+    ) -> AsyncIterator[Dict]:
+        """
+        流式智能对话 - 逐块产出事件（超时由调用方通过 asyncio.wait_for 控制）。
+
+        事件格式：
+            {"type": "text", "content": str}   增量文本（前端追加渲染）
+            {"type": "tool", "name": str}      工具调用事件（前端展示状态）
+        """
+        if not chat_model_name:
+            chat_model_name = "qwen-turbo-latest"
+
+        if not prompt:
+            raise ValueError("prompt is required")
+        if not query:
+            raise ValueError("query is required")
+
+        tools, messages = self._build_tools_and_messages(
+            prompt=prompt,
+            query=query,
+            use_memory=use_memory,
+            history=history,
+            db_name=db_name,
+            mcp_tools=mcp_tools,
+            user_id=user_id,
+        )
+
+        llm = self._create_llm(chat_model_name)
+
+        if tools:
+            # Agent 模式：逐 token 流式输出，工具事件单独透出
+            self.log_info(
+                f"工具列表数量: {len(tools)}, 工具名称: {[t.name for t in tools]}"
+            )
+            agent = create_react_agent(llm, tools)
+            handler = MCPToolLoggingHandler(
+                self.logger,
+                request_id=request_id,
+                db=db,
+                db_factory=tool_db_factory,
+                user_id=user_id,
+            )
+            async for msg_chunk, _meta in agent.astream(
+                {"messages": messages},
+                config={"callbacks": [handler]},
+                stream_mode="messages",
+            ):
+                msg_type = getattr(msg_chunk, "type", "")
+                content = getattr(msg_chunk, "content", "") or ""
+                if msg_type == "tool":
+                    yield {
+                        "type": "tool",
+                        "name": getattr(msg_chunk, "name", None) or "tool",
+                    }
+                elif content:
+                    yield {"type": "text", "content": content}
+        else:
+            # 直接对话模式（不使用工具）：逐 token 流式
+            async for chunk in llm.astream(messages):
+                content = getattr(chunk, "content", "") or ""
+                if content:
+                    yield {"type": "text", "content": content}
