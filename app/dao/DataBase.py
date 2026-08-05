@@ -77,6 +77,9 @@ def _get_all_databases_pgvector(user_id: Optional[str] = None) -> List[Dict]:
                 return []
 
             # 查询 langchain_pg_collection 表，包含元数据和 UUID
+            # 注意：langchain_pg_collection 没有 created_at 列，
+            # created_at 信息存储在 cmetadata JSON 字段中
+            # json 类型不支持 GROUP BY，所以只 GROUP BY uuid (主键)
             result = conn.execute(
                 text(
                     """
@@ -84,11 +87,10 @@ def _get_all_databases_pgvector(user_id: Optional[str] = None) -> List[Dict]:
                         c.uuid,
                         c.name,
                         c.cmetadata,
-                        c.created_at,
                         COUNT(e.id) as document_count
                     FROM langchain_pg_collection c
                     LEFT JOIN langchain_pg_embedding e ON c.uuid = e.collection_id
-                    GROUP BY c.uuid, c.name, c.cmetadata, c.created_at
+                    GROUP BY c.uuid
                     ORDER BY c.name
                 """
                 )
@@ -101,20 +103,15 @@ def _get_all_databases_pgvector(user_id: Optional[str] = None) -> List[Dict]:
                 cmetadata = row[2] or {}
                 if user_id is not None and cmetadata.get("user_id") != user_id:
                     continue
-                created_at_db = row[3]
-                document_count = row[4] or 0
+                document_count = row[3] or 0
 
                 # 向后兼容：如果元数据中不存在某些字段，使用默认值
                 # 对于旧知识库，name 可能不存在，使用 db_name 作为后备
                 display_name = cmetadata.get("name") if cmetadata.get("name") else name
                 # 对于旧知识库，embedding_model_name 可能不存在
                 embedding_model = cmetadata.get("embedding_model_name", "unknown")
-                # 对于旧知识库，created_at 可能不存在，使用数据库创建时间
-                created_at = cmetadata.get("created_at")
-                if not created_at and created_at_db:
-                    created_at = created_at_db.isoformat()
-                elif not created_at:
-                    created_at = datetime.now().isoformat()
+                # created_at 存储在 cmetadata 中，不存在则使用当前时间
+                created_at = cmetadata.get("created_at") or datetime.now().isoformat()
 
                 # 构建知识库信息
                 db_info = {
@@ -243,12 +240,11 @@ def _get_database_info_pgvector(
                         c.uuid,
                         c.name,
                         c.cmetadata,
-                        c.created_at,
                         COUNT(e.id) as document_count
                     FROM langchain_pg_collection c
                     LEFT JOIN langchain_pg_embedding e ON c.uuid = e.collection_id
                     WHERE c.name = :name
-                    GROUP BY c.uuid, c.name, c.cmetadata, c.created_at
+                    GROUP BY c.uuid
                 """
                 ),
                 {"name": get_scoped_db_name(user_id, db_name)},
@@ -262,17 +258,13 @@ def _get_database_info_pgvector(
             cmetadata = row[2] or {}
             if user_id is not None and cmetadata.get("user_id") != user_id:
                 return None
-            created_at_db = row[3]
-            document_count = row[4] or 0
+            document_count = row[3] or 0
 
             # 向后兼容处理
             display_name = cmetadata.get("name") if cmetadata.get("name") else name
             embedding_model = cmetadata.get("embedding_model_name", "unknown")
-            created_at = cmetadata.get("created_at")
-            if not created_at and created_at_db:
-                created_at = created_at_db.isoformat()
-            elif not created_at:
-                created_at = datetime.now().isoformat()
+            # created_at 存储在 cmetadata 中
+            created_at = cmetadata.get("created_at") or datetime.now().isoformat()
 
             return {
                 "id": str(uuid),
