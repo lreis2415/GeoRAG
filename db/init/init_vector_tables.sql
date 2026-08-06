@@ -12,10 +12,13 @@ CREATE EXTENSION IF NOT EXISTS vector;
 --
 -- 如果需要手动创建或自定义表结构，可以参考以下语句：
 
--- 1. 为 langchain_pg_collection 表添加 created_at 字段（如果不存在）
+-- 1. 为 langchain_pg_collection 表添加 created_at 字段（如果表存在且无此列）
 DO $$
 BEGIN
-    IF NOT EXISTS (
+    IF EXISTS (
+        SELECT 1 FROM pg_tables
+        WHERE schemaname = 'public' AND tablename = 'langchain_pg_collection'
+    ) AND NOT EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_name = 'langchain_pg_collection' AND column_name = 'created_at'
     ) THEN
@@ -23,10 +26,13 @@ BEGIN
     END IF;
 END $$;
 
--- 2. 将 cmetadata 字段从 json 转换为 jsonb（如果存在且为 json 类型）
+-- 2. 将 cmetadata 字段从 json 转换为 jsonb（如果表存在且为 json 类型）
 DO $$
 BEGIN
     IF EXISTS (
+        SELECT 1 FROM pg_tables
+        WHERE schemaname = 'public' AND tablename = 'langchain_pg_collection'
+    ) AND EXISTS (
         SELECT 1 FROM information_schema.columns
         WHERE table_name = 'langchain_pg_collection' AND column_name = 'cmetadata' AND data_type = 'json'
     ) THEN
@@ -34,9 +40,17 @@ BEGIN
     END IF;
 END $$;
 
--- 3. 为 cmetadata 创建 GIN 索引以支持 JSONB 查询
-CREATE INDEX IF NOT EXISTS idx_langchain_pg_collection_cmetadata 
-    ON langchain_pg_collection USING GIN (cmetadata);
+-- 3. 为 cmetadata 创建 GIN 索引以支持 JSONB 查询（表存在时）
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_tables
+        WHERE schemaname = 'public' AND tablename = 'langchain_pg_collection'
+    ) THEN
+        CREATE INDEX IF NOT EXISTS idx_langchain_pg_collection_cmetadata
+            ON langchain_pg_collection USING GIN (cmetadata);
+    END IF;
+END $$;
 
 -- 2. 集合元数据表（可选，用于知识库管理）
 CREATE TABLE IF NOT EXISTS vector_collections (
