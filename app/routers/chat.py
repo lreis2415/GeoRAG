@@ -484,7 +484,9 @@ async def chat_stream(
             event_generator(),
             media_type="text/event-stream",
             headers={
-                "Cache-Control": "no-cache",
+                # no-transform: 让 Express/compression 中间件跳过 gzip，
+                # 否则 gzip 会攒块缓冲，浏览器只能一次性收到整段流
+                "Cache-Control": "no-cache, no-transform",
                 "X-Accel-Buffering": "no",
                 "Connection": "keep-alive",
             },
