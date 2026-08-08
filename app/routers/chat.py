@@ -62,6 +62,9 @@ async def chat_with_agent(
 ):
     """
     聊天对话（支持记忆、向量数据库 RAG 和 MCP 工具）
+
+    use_memory=true 时 session_id 可省略：未提供或不存在时自动创建新会话，
+    并在响应中返回新 session_id（无需先调用 /chat/init）。
     """
     request_id = uuid.uuid4().hex
     started_at = datetime.now()
@@ -82,32 +85,25 @@ async def chat_with_agent(
         history = None
 
         if request.use_memory:
-            # 检查是否提供了session_id
-            if not request.session_id:
-                return error_response(
-                    message="session_id is required when use_memory is enabled",
-                    code=4000,
-                )
-
-            # 验证会话是否存在
-            if not chat_service.session_exists(
+            if request.session_id and chat_service.session_exists(
                 request.session_id, db=db, user_id=current_user.user_id
             ):
-                return error_response(
-                    message="Session does not exist. Please create a session first.",
-                    code=4004,
+                # 已有会话：加载历史对话，保持原行为
+                session_id = request.session_id
+                chat_service.update_session_activity(session_id, current_user.user_id)
+                history = chat_service.get_conversation_history(
+                    session_id, db=db, user_id=current_user.user_id
                 )
 
-            # 获取历史对话
-            session_id = request.session_id
-            chat_service.update_session_activity(session_id, current_user.user_id)
-            history = chat_service.get_conversation_history(
-                session_id, db=db, user_id=current_user.user_id
-            )
-
-            # 保存会话到数据库
-            if session_id:
+                # 保存会话到数据库
                 chat_dao.save_session(db, session_id, user_id=current_user.user_id)
+            else:
+                # 未提供或会话不存在：自动创建（调试友好，无需先调 /chat/init）
+                session_id = request.session_id or str(uuid.uuid4())
+                chat_service.create_session(
+                    session_id=session_id, db=db, user_id=current_user.user_id
+                )
+                logger.info("自动创建新会话: session_id=%s", session_id)
 
         # 先落库用户消息和运行状态。后续 MCP 超时、异常或取消时，用户输入仍可恢复。
         user_message_id = None
@@ -272,6 +268,9 @@ async def chat_stream(
     """
     聊天对话（SSE 流式）— 支持记忆、向量数据库 RAG 和 MCP 工具
 
+    use_memory=true 时 session_id 可省略：未提供或不存在时自动创建新会话，
+    并在 done 事件中返回新 session_id（无需先调用 /chat/init）。
+
     事件格式：
         data: {"type": "text", "content": "..."}    增量文本
         data: {"type": "tool", "name": "..."}      工具调用
@@ -293,28 +292,25 @@ async def chat_stream(
     try:
         # 处理会话和记忆
         if request.use_memory:
-            # 检查是否提供了session_id
-            if not request.session_id:
-                return error_response(
-                    message="使用记忆功能时必须提供session_id", code=4000
-                )
-
-            # 验证会话是否存在
-            if not chat_service.session_exists(
+            if request.session_id and chat_service.session_exists(
                 request.session_id, db=db, user_id=current_user.user_id
             ):
-                return error_response(message="会话不存在，请先创建会话", code=4004)
+                # 已有会话：加载历史对话，保持原行为
+                session_id = request.session_id
+                chat_service.update_session_activity(session_id, current_user.user_id)
+                history = chat_service.get_conversation_history(
+                    session_id, db=db, user_id=current_user.user_id
+                )
 
-            # 获取历史对话
-            session_id = request.session_id
-            chat_service.update_session_activity(session_id, current_user.user_id)
-            history = chat_service.get_conversation_history(
-                session_id, db=db, user_id=current_user.user_id
-            )
-
-            # 保存会话到数据库
-            if session_id:
+                # 保存会话到数据库
                 chat_dao.save_session(db, session_id, user_id=current_user.user_id)
+            else:
+                # 未提供或会话不存在：自动创建（调试友好，无需先调 /chat/init）
+                session_id = request.session_id or str(uuid.uuid4())
+                chat_service.create_session(
+                    session_id=session_id, db=db, user_id=current_user.user_id
+                )
+                logger.info("自动创建新会话: session_id=%s", session_id)
 
         # 先落库用户消息和运行状态
         user_message_id = None
@@ -508,7 +504,10 @@ async def chat_stream(
 
 
 @router.get(
-    "/chat/init", response_model=StandardResponse[ChatInitResponse], tags=["聊天对话"]
+    "/chat/init",
+    response_model=StandardResponse[ChatInitResponse],
+    tags=["聊天对话"],
+    deprecated=True,
 )
 async def init_chat_service(
     current_user: CurrentUser = Depends(get_current_user),
@@ -517,6 +516,11 @@ async def init_chat_service(
 ):
     """
     初始化聊天服务并创建新会话
+
+    .. deprecated::
+        /chat 与 /chat/stream 已支持 use_memory=true 时自动创建会话
+        （省略 session_id 即可，响应中返回新 session_id）。
+        本接口仅用于显式创建空会话（如“新建对话”），不再是对话的前置条件。
     """
     try:
         # 创建新会话

@@ -57,7 +57,9 @@ class ChatRequest(BaseModel):
         None, description="聊天模型名称", example="qwen-turbo-latest"
     )
     session_id: Optional[str] = Field(
-        None, description="会话ID", example="550e8400-e29b-41d4-a716-446655440000"
+        None,
+        description="会话ID（use_memory=true 时可省略，未提供时自动创建并返回）",
+        example="550e8400-e29b-41d4-a716-446655440000",
     )
     use_memory: Optional[bool] = Field(
         None, description="是否使用记忆功能", example=True
