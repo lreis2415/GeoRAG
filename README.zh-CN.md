@@ -217,6 +217,55 @@ docker exec -it georag-postgres psql -U geo -d georag_dev -c "SELECT extname FRO
 ./run_docker.sh
 ```
 
+## 数据库备份与恢复
+
+项目默认使用 Pgvector 向量数据库，数据库运行在 Docker 容器 `georag-postgres` 中（库名 `georag_dev`，用户 `geo`，密码 `123456`，宿主端口 5434 映射容器 5432）。备份文件统一存放在项目根目录 `db_backups/YYYYMMDD_HHMMSS/` 下（已被 git 忽略）。
+
+### 导出（备份）
+
+```bash
+# 创建备份目录
+BACKUP_DIR="db_backups/$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+
+# 在容器内生成备份文件（两种格式）
+docker exec georag-postgres pg_dump -U geo -d georag_dev -Fc -f /tmp/georag_dev.dump  # 压缩格式，恢复用 pg_restore
+docker exec georag-postgres pg_dump -U geo -d georag_dev -Fp -f /tmp/georag_dev.sql   # 纯 SQL 格式，可读、可 psql 导入
+
+# 拷贝到本地并清理容器内临时文件
+docker cp georag-postgres:/tmp/georag_dev.dump "$BACKUP_DIR/georag_dev.dump"
+docker cp georag-postgres:/tmp/georag_dev.sql "$BACKUP_DIR/georag_dev.sql"
+docker exec georag-postgres rm -f /tmp/georag_dev.dump /tmp/georag_dev.sql
+
+# 可选：备份全局对象（角色等）
+docker exec georag-postgres pg_dumpall -U geo --roles-only -f /tmp/globals.sql
+docker cp georag-postgres:/tmp/globals.sql "$BACKUP_DIR/globals.sql"
+```
+
+验证备份文件是否有效：
+
+```bash
+# 检查压缩格式文件头（应显示 PGDMP 魔法字节 + 版本号）
+head -c 8 "$BACKUP_DIR/georag_dev.dump" | xxd
+
+# 检查 SQL 文件是否包含数据（应能看到 COPY 语句）
+grep "^COPY public\." "$BACKUP_DIR/georag_dev.sql"
+```
+
+### 导入（恢复）
+
+```bash
+# 方式 1：从压缩格式恢复（推荐，--clean 会覆盖已有同名对象）
+docker exec -i georag-postgres pg_restore -U geo -d georag_dev --clean --if-exists < "$BACKUP_DIR/georag_dev.dump"
+
+# 方式 2：从纯 SQL 恢复
+docker exec -i georag-postgres psql -U geo -d georag_dev < "$BACKUP_DIR/georag_dev.sql"
+```
+
+注意事项：
+- 若恢复到全新容器，需先确保 pgvector 扩展可用（`db/init/init_vector_tables.sql` 会在容器首次启动时自动执行）。
+- SQL 备份会把 `search_path` 重置为 `''`，导入遇到 schema 相关错误时，先执行 `SET search_path = public;` 再重试。
+
 ## 代码质量
 
 ### Pre-commit 钩子

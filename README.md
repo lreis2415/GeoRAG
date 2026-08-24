@@ -252,6 +252,55 @@ docker exec -it georag-postgres psql -U geo -d georag_dev -c "SELECT extname FRO
 ./run_docker.sh
 ```
 
+## Database Backup & Restore
+
+The project uses Pgvector as the default vector database backend. The PostgreSQL database runs in the Docker container `georag-postgres` (database `georag_dev`, user `geo`, password `123456`, host port 5434 mapped to container port 5432). Backup files are stored under `db_backups/YYYYMMDD_HHMMSS/` in the project root (git-ignored).
+
+### Export (Backup)
+
+```bash
+# Create a backup directory
+BACKUP_DIR="db_backups/$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+
+# Generate backup files inside the container (two formats)
+docker exec georag-postgres pg_dump -U geo -d georag_dev -Fc -f /tmp/georag_dev.dump  # custom format, restore with pg_restore
+docker exec georag-postgres pg_dump -U geo -d georag_dev -Fp -f /tmp/georag_dev.sql   # plain SQL, readable and importable with psql
+
+# Copy to local and clean up temp files in the container
+docker cp georag-postgres:/tmp/georag_dev.dump "$BACKUP_DIR/georag_dev.dump"
+docker cp georag-postgres:/tmp/georag_dev.sql "$BACKUP_DIR/georag_dev.sql"
+docker exec georag-postgres rm -f /tmp/georag_dev.dump /tmp/georag_dev.sql
+
+# Optional: back up global objects (roles, etc.)
+docker exec georag-postgres pg_dumpall -U geo --roles-only -f /tmp/globals.sql
+docker cp georag-postgres:/tmp/globals.sql "$BACKUP_DIR/globals.sql"
+```
+
+Verify the backup files:
+
+```bash
+# Check the custom-format file header (should show PGDMP magic bytes + version)
+head -c 8 "$BACKUP_DIR/georag_dev.dump" | xxd
+
+# Check the SQL file contains data (should see COPY statements)
+grep "^COPY public\." "$BACKUP_DIR/georag_dev.sql"
+```
+
+### Import (Restore)
+
+```bash
+# Option 1: Restore from custom format (recommended, --clean overwrites existing objects)
+docker exec -i georag-postgres pg_restore -U geo -d georag_dev --clean --if-exists < "$BACKUP_DIR/georag_dev.dump"
+
+# Option 2: Restore from plain SQL
+docker exec -i georag-postgres psql -U geo -d georag_dev < "$BACKUP_DIR/georag_dev.sql"
+```
+
+Notes:
+- When restoring into a fresh container, make sure the pgvector extension is available (`db/init/init_vector_tables.sql` runs automatically on first container startup).
+- The SQL dump resets `search_path` to `''`. If you hit schema-related errors during import, run `SET search_path = public;` and retry.
+
 ## Code Quality
 
 ### Pre-commit Hooks

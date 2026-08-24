@@ -47,6 +47,9 @@ tests/logs/
 # 数据
 data/
 
+# 数据库备份
+db_backups/
+
 # 压缩包
 *.zip
 *.tar.gz
