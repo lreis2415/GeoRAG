@@ -2,6 +2,8 @@
 CREATE TABLE IF NOT EXISTS chat_sessions(
     session_id text NOT NULL,
     user_id text NOT NULL,
+    title varchar(200),
+    chat_model_name varchar(200),
     created_at timestamp with time zone DEFAULT now(),
     PRIMARY KEY(session_id)
 );

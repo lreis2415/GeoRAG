@@ -11,6 +11,9 @@ class ChatSession(Base):
     session_id = Column(String(64), primary_key=True, index=True, comment="会话ID")
     user_id = Column(String(128), index=True, nullable=True, comment="Java用户ID")
     title = Column(String(200), nullable=True, comment="会话标题")
+    chat_model_name = Column(
+        String(200), nullable=True, comment="会话最近一次使用的聊天模型"
+    )
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
 
 

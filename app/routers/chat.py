@@ -96,12 +96,23 @@ async def chat_with_agent(
                 )
 
                 # 保存会话到数据库
-                chat_dao.save_session(db, session_id, user_id=current_user.user_id)
+                chat_dao.save_session(
+                    db,
+                    session_id,
+                    user_id=current_user.user_id,
+                    chat_model_name=chat_model_name,
+                )
             else:
                 # 未提供或会话不存在：自动创建（调试友好，无需先调 /chat/init）
                 session_id = request.session_id or str(uuid.uuid4())
                 chat_service.create_session(
                     session_id=session_id, db=db, user_id=current_user.user_id
+                )
+                chat_dao.save_session(
+                    db,
+                    session_id,
+                    user_id=current_user.user_id,
+                    chat_model_name=chat_model_name,
                 )
                 logger.info("自动创建新会话: session_id=%s", session_id)
 
@@ -303,12 +314,23 @@ async def chat_stream(
                 )
 
                 # 保存会话到数据库
-                chat_dao.save_session(db, session_id, user_id=current_user.user_id)
+                chat_dao.save_session(
+                    db,
+                    session_id,
+                    user_id=current_user.user_id,
+                    chat_model_name=chat_model_name,
+                )
             else:
                 # 未提供或会话不存在：自动创建（调试友好，无需先调 /chat/init）
                 session_id = request.session_id or str(uuid.uuid4())
                 chat_service.create_session(
                     session_id=session_id, db=db, user_id=current_user.user_id
+                )
+                chat_dao.save_session(
+                    db,
+                    session_id,
+                    user_id=current_user.user_id,
+                    chat_model_name=chat_model_name,
                 )
                 logger.info("自动创建新会话: session_id=%s", session_id)
 
@@ -702,6 +724,7 @@ async def _get_chat_history_internal(
             "session": {
                 "session_id": session_id,
                 "title": title,
+                "chat_model_name": session_info.get("chat_model_name"),
                 "created_at": (
                     created_at.isoformat()
                     if hasattr(created_at, "isoformat")

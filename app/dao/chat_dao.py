@@ -16,7 +16,9 @@ class ChatDAO:
     """聊天数据访问对象"""
 
     _title_column_checked = False
+    _chat_model_column_checked = False
     _observability_tables_checked = False
+    _chat_tables_checked = False
 
     @classmethod
     def _ensure_observability_tables(cls, db: Session) -> None:
@@ -34,6 +36,24 @@ class ChatDAO:
         except Exception:
             db.rollback()
             logger.exception("创建聊天审计表失败")
+            raise
+
+    @classmethod
+    def _ensure_chat_tables(cls, db: Session) -> None:
+        """Create chat session/message tables for deployments that predate them."""
+        if cls._chat_tables_checked:
+            return
+
+        try:
+            engine = db.get_bind()
+            if engine is None:
+                return
+            ChatSession.__table__.create(bind=engine, checkfirst=True)
+            ChatMessage.__table__.create(bind=engine, checkfirst=True)
+            cls._chat_tables_checked = True
+        except Exception:
+            db.rollback()
+            logger.exception("创建聊天会话表失败")
             raise
 
     @staticmethod
@@ -82,12 +102,40 @@ class ChatDAO:
             # 对于测试 mock 或非标准数据库，忽略并继续
             db.rollback()
 
+    @classmethod
+    def _ensure_chat_model_column(cls, db: Session) -> None:
+        """Best-effort schema compatibility for session model metadata."""
+        if cls._chat_model_column_checked:
+            return
+
+        try:
+            engine = db.get_bind()
+            if engine is None:
+                return
+
+            columns = {
+                col["name"] for col in inspect(engine).get_columns("chat_sessions")
+            }
+            if "chat_model_name" not in columns:
+                db.execute(
+                    text(
+                        "ALTER TABLE chat_sessions "
+                        "ADD COLUMN chat_model_name VARCHAR(200)"
+                    )
+                )
+                db.commit()
+            cls._chat_model_column_checked = True
+        except Exception:
+            # 对于测试 mock 或非标准数据库，忽略并继续
+            db.rollback()
+
     @staticmethod
     def save_session(
         db: Session,
         session_id: str,
         title: Optional[str] = None,
         user_id: Optional[str] = None,
+        chat_model_name: Optional[str] = None,
     ) -> None:
         """
         保存会话到数据库
@@ -96,21 +144,31 @@ class ChatDAO:
             db: 数据库会话
             session_id: 会话ID
             title: 会话标题（可选）
+            chat_model_name: 会话最近一次使用的聊天模型（可选）
 
         Raises:
             SQLAlchemyError: 数据库操作异常
         """
         try:
+            ChatDAO._ensure_chat_tables(db)
             ChatDAO._ensure_title_column(db)
+            ChatDAO._ensure_chat_model_column(db)
             existing_session = db.get(ChatSession, session_id)
             if existing_session:
                 if user_id is not None and existing_session.user_id != user_id:
                     raise ValueError("Session belongs to another user")
                 if title is not None:
                     existing_session.title = title
+                if chat_model_name is not None:
+                    existing_session.chat_model_name = chat_model_name
             else:
                 db.add(
-                    ChatSession(session_id=session_id, title=title, user_id=user_id)
+                    ChatSession(
+                        session_id=session_id,
+                        title=title,
+                        user_id=user_id,
+                        chat_model_name=chat_model_name,
+                    )
                 )
             db.commit()
             logger.debug(f"Session saved: {session_id}")
@@ -125,7 +183,9 @@ class ChatDAO:
     ) -> Optional[dict]:
         """获取单个会话信息"""
         try:
+            ChatDAO._ensure_chat_tables(db)
             ChatDAO._ensure_title_column(db)
+            ChatDAO._ensure_chat_model_column(db)
             query = db.query(ChatSession).filter(ChatSession.session_id == session_id)
             if user_id is not None:
                 query = query.filter(ChatSession.user_id == user_id)
@@ -136,6 +196,7 @@ class ChatDAO:
             return {
                 "session_id": session.session_id,
                 "title": session.title,
+                "chat_model_name": session.chat_model_name,
                 "created_at": (
                     session.created_at.isoformat() if session.created_at else None
                 ),
@@ -160,6 +221,7 @@ class ChatDAO:
             bool: 是否更新成功
         """
         try:
+            ChatDAO._ensure_chat_tables(db)
             ChatDAO._ensure_title_column(db)
             query = db.query(ChatSession).filter(ChatSession.session_id == session_id)
             if user_id is not None:
@@ -199,6 +261,7 @@ class ChatDAO:
             ValueError: 内容过长或无效
         """
         try:
+            ChatDAO._ensure_chat_tables(db)
             # 验证和清理内容
             if not isinstance(content, str):
                 content = str(content)
@@ -385,6 +448,7 @@ class ChatDAO:
             List[dict]: 消息列表，每个消息是包含角色和内容的字典
         """
         try:
+            ChatDAO._ensure_chat_tables(db)
             query = db.query(ChatMessage).filter(ChatMessage.session_id == session_id)
             if user_id is not None:
                 query = query.filter(ChatMessage.user_id == user_id)
@@ -416,6 +480,7 @@ class ChatDAO:
             bool: 是否删除成功
         """
         try:
+            ChatDAO._ensure_chat_tables(db)
             # 先删除消息
             message_query = db.query(ChatMessage).filter(
                 ChatMessage.session_id == session_id
@@ -441,9 +506,7 @@ class ChatDAO:
             return False
 
     @staticmethod
-    def get_all_sessions(
-        db: Session, user_id: Optional[str] = None
-    ) -> List[dict]:
+    def get_all_sessions(db: Session, user_id: Optional[str] = None) -> List[dict]:
         """
         获取所有会话信息
 
@@ -454,21 +517,25 @@ class ChatDAO:
             List[dict]: 会话信息列表，每个会话包含session_id, created_at, message_count
         """
         try:
+            ChatDAO._ensure_chat_tables(db)
             ChatDAO._ensure_title_column(db)
+            ChatDAO._ensure_chat_model_column(db)
             # 获取所有会话及其消息数量
             query = db.query(
                 ChatSession.session_id,
                 ChatSession.title,
+                ChatSession.chat_model_name,
                 ChatSession.created_at,
                 func.count(ChatMessage.message_id).label("message_count"),
-            ).outerjoin(
-                ChatMessage, ChatSession.session_id == ChatMessage.session_id
-            )
+            ).outerjoin(ChatMessage, ChatSession.session_id == ChatMessage.session_id)
             if user_id is not None:
                 query = query.filter(ChatSession.user_id == user_id)
             sessions = (
                 query.group_by(
-                    ChatSession.session_id, ChatSession.title, ChatSession.created_at
+                    ChatSession.session_id,
+                    ChatSession.title,
+                    ChatSession.chat_model_name,
+                    ChatSession.created_at,
                 )
                 .order_by(ChatSession.created_at.desc())
                 .all()
@@ -478,6 +545,7 @@ class ChatDAO:
                 {
                     "session_id": s.session_id,
                     "title": s.title,
+                    "chat_model_name": s.chat_model_name,
                     "created_at": s.created_at.isoformat() if s.created_at else None,
                     "message_count": s.message_count or 0,
                 }
@@ -500,6 +568,7 @@ class ChatDAO:
             bool: 是否清空成功
         """
         try:
+            ChatDAO._ensure_chat_tables(db)
             # 删除所有消息
             message_query = db.query(ChatMessage)
             session_query = db.query(ChatSession)
@@ -532,6 +601,7 @@ class ChatDAO:
             List[dict]: 消息列表，包含 message_id/role/content/created_at
         """
         try:
+            ChatDAO._ensure_chat_tables(db)
             query = db.query(
                 ChatMessage.message_id,
                 ChatMessage.role,

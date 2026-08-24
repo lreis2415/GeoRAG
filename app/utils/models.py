@@ -140,6 +140,9 @@ class ChatSessionInfo(BaseModel):
 
     session_id: str = Field(..., description="会话ID")
     title: str = Field(..., description="会话标题")
+    chat_model_name: Optional[str] = Field(
+        None, description="会话最近一次使用的聊天模型"
+    )
     created_at: str = Field(..., description="会话创建时间（ISO 8601）")
     message_count: int = Field(..., description="消息总数")
 
