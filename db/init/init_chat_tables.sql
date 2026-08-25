@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS chat_messages(
     user_id text NOT NULL,
     role text NOT NULL,
     content text NOT NULL,
+    tool_calls_json JSONB,
+    generation_status varchar(20),
     created_at timestamp with time zone DEFAULT now(),
     PRIMARY KEY(message_id),
     CONSTRAINT chat_messages_session_id_fkey FOREIGN key(session_id) REFERENCES chat_sessions(session_id)

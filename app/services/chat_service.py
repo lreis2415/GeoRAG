@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from ..dao.chat_dao import ChatDAO
 from ..utils.config import config
 from ..utils.handler import MCPToolLoggingHandler
+from ..utils.tool_calls import ToolCallTracker
 from .base_service import BaseService
 from .database_service import DatabaseService
 
@@ -703,7 +704,7 @@ class ChatService(BaseService):
 
         事件格式：
             {"type": "text", "content": str}   增量文本（前端追加渲染）
-            {"type": "tool", "name": str}      工具调用事件（前端展示状态）
+            {"type": "tool", ...}                工具调用生命周期事件
         """
         if not chat_model_name:
             chat_model_name = "qwen-turbo-latest"
@@ -738,23 +739,37 @@ class ChatService(BaseService):
                 db_factory=tool_db_factory,
                 user_id=user_id,
             )
-            async for msg_chunk, _meta in agent.astream(
-                {"messages": messages},
-                config={
-                    "callbacks": [handler],
-                    "recursion_limit": config.MCP_AGENT_RECURSION_LIMIT,
-                },
-                stream_mode="messages",
-            ):
-                msg_type = getattr(msg_chunk, "type", "")
-                content = getattr(msg_chunk, "content", "") or ""
-                if msg_type == "tool":
-                    yield {
-                        "type": "tool",
-                        "name": getattr(msg_chunk, "name", None) or "tool",
-                    }
-                elif content:
-                    yield {"type": "text", "content": content}
+            tracker = ToolCallTracker()
+            try:
+                async for msg_chunk, _meta in agent.astream(
+                    {"messages": messages},
+                    config={
+                        "callbacks": [handler],
+                        "recursion_limit": config.MCP_AGENT_RECURSION_LIMIT,
+                    },
+                    stream_mode="messages",
+                ):
+                    msg_type = getattr(msg_chunk, "type", "")
+                    tool_calls = getattr(msg_chunk, "tool_calls", None)
+                    if tool_calls:
+                        for event in tracker.start(tool_calls):
+                            yield event
+
+                    content = getattr(msg_chunk, "content", "") or ""
+                    if msg_type == "tool":
+                        for event in tracker.finish_message(msg_chunk):
+                            yield event
+                    elif content:
+                        yield {"type": "text", "content": content}
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                for event in tracker.fail_pending("mcp.agent_failed"):
+                    yield event
+                raise
+            else:
+                for event in tracker.fail_pending("mcp.execution_incomplete"):
+                    yield event
         else:
             # 直接对话模式（不使用工具）：逐 token 流式
             async for chunk in llm.astream(messages):

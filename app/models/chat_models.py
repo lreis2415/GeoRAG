@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Integer, String, Text, func
+from sqlalchemy import JSON, Column, DateTime, Integer, String, Text, func
 
 from app.db.base import Base
 
@@ -27,6 +27,10 @@ class ChatMessage(Base):
     user_id = Column(String(128), index=True, nullable=True, comment="Java用户ID")
     role = Column(String(20), nullable=False, comment="角色：user/assistant")
     content = Column(Text, nullable=False, comment="消息内容")
+    tool_calls_json = Column(JSON, nullable=True, comment="面向 UI 的精简工具调用记录")
+    generation_status = Column(
+        String(20), nullable=True, comment="助手消息生成状态"
+    )
     created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
 
     @classmethod

@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models.chat_models import ChatMessage, ChatRun, ChatSession, ToolRun
+from app.utils.tool_calls import normalize_tool_calls
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +243,8 @@ class ChatDAO:
         content: str,
         message_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        tool_calls: Optional[List[dict]] = None,
+        generation_status: Optional[str] = None,
     ) -> str:
         """
         保存消息到数据库
@@ -284,6 +287,16 @@ class ChatDAO:
                 if session_exists is None:
                     raise ValueError("Session not found")
 
+            safe_tool_calls = normalize_tool_calls(tool_calls)
+            if generation_status not in {
+                None,
+                "succeeded",
+                "failed",
+                "timed_out",
+                "cancelled",
+            }:
+                generation_status = "failed"
+
             # 创建消息对象
             message = ChatMessage(
                 message_id=message_id or ChatMessage.create_id(),
@@ -291,6 +304,8 @@ class ChatDAO:
                 user_id=user_id,
                 role=role,
                 content=content,
+                tool_calls_json=safe_tool_calls or None,
+                generation_status=generation_status,
             )
 
             db.add(message)
@@ -606,6 +621,8 @@ class ChatDAO:
                 ChatMessage.message_id,
                 ChatMessage.role,
                 ChatMessage.content,
+                ChatMessage.tool_calls_json,
+                ChatMessage.generation_status,
                 ChatMessage.created_at,
             ).filter(ChatMessage.session_id == session_id)
             if user_id is not None:
@@ -617,6 +634,8 @@ class ChatDAO:
                     "message_id": msg.message_id,
                     "role": msg.role,
                     "content": msg.content,
+                    "tool_calls": normalize_tool_calls(msg.tool_calls_json),
+                    "generation_status": msg.generation_status,
                     "created_at": (
                         msg.created_at.isoformat() if msg.created_at else None
                     ),

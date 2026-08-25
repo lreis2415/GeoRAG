@@ -37,6 +37,7 @@ from app.utils.models import (
     StandardResponse,
 )
 from app.utils.response import error_response, success_response
+from app.utils.tool_calls import is_safe_identifier, normalize_tool_calls
 
 from ..services.chat_service import ChatService
 from ..services.mcp_service import MCPService
@@ -411,6 +412,9 @@ async def chat_stream(
             final_response = ""
             message_count = None
             terminal_recorded = False
+            assistant_persisted = False
+            tool_states: Dict[str, Dict] = {}
+            last_tool_sequence = 0
 
             def record_run(status: str, error: Optional[object] = None):
                 nonlocal terminal_recorded
@@ -425,6 +429,114 @@ async def chat_stream(
                     error,
                     user_id=current_user.user_id,
                 )
+
+            def remember_tool(event: Dict) -> None:
+                """Keep only safe lifecycle fields for terminal persistence."""
+                nonlocal last_tool_sequence
+                call_id = event.get("call_id")
+                if not is_safe_identifier(call_id):
+                    return
+                sequence = event.get("sequence")
+                if isinstance(sequence, int) and sequence > last_tool_sequence:
+                    last_tool_sequence = sequence
+                previous = tool_states.get(call_id)
+                if previous and isinstance(sequence, int) and sequence <= previous.get(
+                    "sequence", 0
+                ):
+                    return
+                if previous and previous.get("status") in {"succeeded", "failed"}:
+                    return
+                tool_states[call_id] = {
+                    key: value
+                    for key, value in event.items()
+                    if key
+                    in {
+                        "call_id",
+                        "sequence",
+                        "status",
+                        "tool_key",
+                        "tool_name",
+                        "tool_source",
+                        "duration_ms",
+                        "code",
+                    }
+                }
+
+            def close_pending_tools(code: str) -> List[Dict]:
+                nonlocal last_tool_sequence
+                events = []
+                for call_id, state in list(tool_states.items()):
+                    if state.get("status") != "started":
+                        continue
+                    last_tool_sequence += 1
+                    event = {
+                        "type": "tool",
+                        "call_id": call_id,
+                        "sequence": last_tool_sequence,
+                        "status": "failed",
+                        "tool_key": state.get("tool_key", "mcp.tool"),
+                        "tool_name": state.get("tool_name"),
+                        "tool_source": state.get("tool_source", "mcp"),
+                        "code": code,
+                    }
+                    remember_tool(event)
+                    events.append(event)
+                return events
+
+            def completed_tool_calls() -> List[Dict]:
+                return normalize_tool_calls(
+                    [
+                        {
+                            "id": state.get("call_id"),
+                            "sequence": state.get("sequence"),
+                            "tool_key": state.get("tool_key"),
+                            "tool_name": state.get("tool_name"),
+                            "tool_source": state.get("tool_source"),
+                            "status": state.get("status"),
+                            "duration_ms": state.get("duration_ms"),
+                            "code": state.get("code"),
+                        }
+                        for state in tool_states.values()
+                    ]
+                )
+
+            def persist_assistant(status: str, add_to_memory: bool = False) -> None:
+                nonlocal assistant_persisted, message_count
+                if assistant_persisted or not request.use_memory or not session_id:
+                    return
+                tool_calls = completed_tool_calls()
+                if not final_response and not tool_calls:
+                    return
+                chat_service.ensure_session_title(
+                    session_id, request.query, db, user_id=current_user.user_id
+                )
+                if add_to_memory:
+                    chat_service.add_to_memory(
+                        session_id,
+                        request.query,
+                        final_response,
+                        db=db,
+                        user_id=current_user.user_id,
+                    )
+                chat_dao.save_message(
+                    db,
+                    session_id,
+                    "assistant",
+                    final_response,
+                    user_id=current_user.user_id,
+                    tool_calls=tool_calls,
+                    generation_status=status,
+                )
+                assistant_persisted = True
+                if add_to_memory:
+                    message_count = (
+                        len(
+                            chat_service.get_conversation_history(
+                                session_id, db=db, user_id=current_user.user_id
+                            )
+                        )
+                        // 2
+                    )
 
             try:
                 iterator = chat_service.chat_stream(
@@ -454,6 +566,9 @@ async def chat_stream(
                     except StopAsyncIteration:
                         break
                     except asyncio.TimeoutError:
+                        for tool_event in close_pending_tools("mcp.timed_out"):
+                            yield _sse_payload(tool_event)
+                        persist_assistant("timed_out")
                         record_run("timed_out")
                         logger.error(
                             "流式聊天请求超时: request_id=%s timeout_seconds=%s",
@@ -469,38 +584,12 @@ async def chat_stream(
                         final_response += event["content"]
                         yield _sse_payload(event)
                     elif event["type"] == "tool":
+                        remember_tool(event)
                         yield _sse_payload(event)
 
-                # 流结束：落库 AI 回复（与 /chat 行为一致）
-                if request.use_memory and session_id:
-                    chat_service.ensure_session_title(
-                        session_id,
-                        request.query,
-                        db,
-                        user_id=current_user.user_id,
-                    )
-                    chat_service.add_to_memory(
-                        session_id,
-                        request.query,
-                        final_response,
-                        db=db,
-                        user_id=current_user.user_id,
-                    )
-                    chat_dao.save_message(
-                        db,
-                        session_id,
-                        "assistant",
-                        final_response,
-                        user_id=current_user.user_id,
-                    )
-                    message_count = (
-                        len(
-                            chat_service.get_conversation_history(
-                                session_id, db=db, user_id=current_user.user_id
-                            )
-                        )
-                        // 2
-                    )
+                for tool_event in close_pending_tools("mcp.execution_incomplete"):
+                    yield _sse_payload(tool_event)
+                persist_assistant("succeeded", add_to_memory=True)
 
                 record_run("succeeded")
                 yield _sse_payload(
@@ -512,13 +601,21 @@ async def chat_stream(
                     }
                 )
             except asyncio.CancelledError:
+                close_pending_tools("mcp.cancelled")
+                persist_assistant("cancelled")
                 record_run("cancelled")
                 logger.warning("流式聊天请求已取消: request_id=%s", request_id)
                 raise
             except ValueError as e:
+                for tool_event in close_pending_tools("mcp.agent_failed"):
+                    yield _sse_payload(tool_event)
+                persist_assistant("failed")
                 record_run("failed", e)
                 yield _sse_payload({"type": "error", "code": 4000, "message": str(e)})
             except Exception as e:
+                for tool_event in close_pending_tools("mcp.agent_failed"):
+                    yield _sse_payload(tool_event)
+                persist_assistant("failed")
                 record_run("failed", e)
                 logger.exception("流式聊天处理异常: request_id=%s", request_id)
                 yield _sse_payload(
@@ -784,7 +881,7 @@ async def _get_chat_history_internal(
 
             if msg.get("role") == "assistant":
                 message_item["sources"] = []
-                message_item["tool_calls"] = None
+                message_item["tool_calls"] = msg.get("tool_calls") or None
 
             messages.append(message_item)
 

@@ -137,12 +137,17 @@ class MessageSource(BaseModel):
     content: str = Field(..., description="页面内容摘要")
 
 
-class ToolCall(BaseModel):
-    """工具调用信息"""
+class ToolCallDisplay(BaseModel):
+    """可安全返回给聊天 UI 的工具调用终态。"""
 
-    name: Optional[str] = Field(None, description="工具名称")
-    arguments: Optional[str] = Field(None, description="工具参数")
-    result: Optional[str] = Field(None, description="工具结果")
+    id: str = Field(..., description="展示调用 ID")
+    sequence: int = Field(..., ge=1, description="本请求内事件顺序")
+    tool_key: str = Field(..., description="公开工具展示键")
+    tool_name: Optional[str] = Field(None, description="安全的工具标识")
+    tool_source: str = Field(..., description="工具来源：mcp 或 rag")
+    status: str = Field(..., description="succeeded 或 failed")
+    duration_ms: Optional[int] = Field(None, ge=0, description="工具执行耗时")
+    code: Optional[str] = Field(None, description="安全错误码")
 
 
 class ChatMessageItem(BaseModel):
@@ -153,7 +158,9 @@ class ChatMessageItem(BaseModel):
     content: str = Field(..., description="消息内容")
     created_at: str = Field(..., description="创建时间（ISO 8601）")
     sources: Optional[List[MessageSource]] = Field(None, description="知识库来源")
-    tool_calls: Optional[List[ToolCall]] = Field(None, description="工具调用")
+    tool_calls: Optional[List[ToolCallDisplay]] = Field(
+        None, description="可展示的工具调用终态"
+    )
 
 
 class ChatSessionInfo(BaseModel):
