@@ -53,6 +53,8 @@ module = [
     "chromadb.*",                     # ChromaDB 向量数据库
     "ollama.*",                       # Ollama 本地模型服务
     "deepseek.*",                     # DeepSeek 模型库
+    "keyring",
+    "keyring.*",
 ]
 ignore_missing_imports = true        # 忽略这些库的缺失导入错误
 
