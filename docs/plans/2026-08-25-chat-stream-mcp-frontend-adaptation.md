@@ -33,9 +33,17 @@ interface ChatStreamRequest {
 第一版可提供一个三态控件：`自动`、`关闭`、`开启`。选择“开启”后显示服务器
 多选框；不选择具体服务器表示全部服务器。
 
-由于本版本没有新增 MCP 服务器发现接口，服务器选项应来自前端部署配置，并与
-服务端 `MCP_CONFIG` 的 key 保持一致，例如 `pygeomodels`。如果未来需要动态
-发现，再增加只读服务器列表接口，不要让前端直接读取或提交 MCP URL。
+服务器选项可通过 `GET /llm/v1/mcp/servers` 动态获取：
+
+```json
+{
+  "initialized": true,
+  "servers": [{"name": "pygeomodels"}]
+}
+```
+
+前端只使用返回的 `name`，不读取或提交 MCP URL。`initialized=false` 时可以展示
+服务器名称，但应禁用“开启 MCP”或提示服务尚未就绪。
 
 ## SSE 处理
 

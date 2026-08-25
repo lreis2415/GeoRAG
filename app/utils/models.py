@@ -86,6 +86,19 @@ class ChatStreamRequest(ChatRequest):
     )
 
 
+class MCPServerInfo(BaseModel):
+    """MCP 服务器的公开信息。"""
+
+    name: str = Field(..., description="MCP 服务器名称")
+
+
+class MCPServersResponse(BaseModel):
+    """MCP 服务器列表响应。"""
+
+    initialized: bool = Field(..., description="MCP 服务是否已完成初始化")
+    servers: List[MCPServerInfo] = Field(..., description="已配置的 MCP 服务器")
+
+
 class HealthResponse(BaseModel):
     """健康检查响应模型"""
 

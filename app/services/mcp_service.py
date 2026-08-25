@@ -98,6 +98,10 @@ class MCPService(BaseService):
         """
         return self.mcp_client
 
+    def get_configured_server_names(self) -> List[str]:
+        """Return configured MCP server names without exposing connection details."""
+        return list(MCP_CONFIG)
+
     def _select_mcp_config(
         self, server_names: Optional[List[str]] = None
     ) -> Dict[str, Any]:

@@ -32,6 +32,7 @@ from app.utils.models import (
     ChatRequest,
     ChatResponse,
     ChatStreamRequest,
+    MCPServersResponse,
     RenameSessionRequest,
     SessionsResponse,
     StandardResponse,
@@ -297,6 +298,26 @@ async def _resolve_stream_mcp_tools(
         token,
         server_names=request.mcp_servers,
         raise_on_error=explicit_mcp,
+    )
+
+
+@router.get(
+    "/mcp/servers",
+    response_model=StandardResponse[MCPServersResponse],
+    tags=["MCP"],
+)
+async def list_mcp_servers(
+    current_user: CurrentUser = Depends(get_current_user),
+    mcp_service: MCPService = Depends(get_mcp_service),
+):
+    """列出当前服务端配置的 MCP 名称，不返回连接地址或认证信息。"""
+    return success_response(
+        data={
+            "initialized": mcp_service.is_mcp_initialized(),
+            "servers": [
+                {"name": name} for name in mcp_service.get_configured_server_names()
+            ],
+        }
     )
 
 

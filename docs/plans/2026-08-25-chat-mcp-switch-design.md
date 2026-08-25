@@ -85,6 +85,21 @@ ChatStreamRequest
 - 日志记录 `request_id`、`use_mcp` 的最终值、选中服务器名称、工具数量和工具名称。
 - 首版不改变既有成功响应结构；如后续需要调试信息，再增加可选的 MCP 元数据字段。
 
+## MCP 服务列表接口
+
+新增鉴权只读接口 `GET /llm/v1/mcp/servers`，返回已配置的 MCP 名称和整体
+初始化状态：
+
+```json
+{
+  "initialized": true,
+  "servers": [{"name": "pygeomodels"}]
+}
+```
+
+接口不返回 URL、transport、headers 或 Token。`initialized` 是 MCP 服务整体状态，
+不是逐服务器健康检查；前端主要使用 `servers[].name` 构造 `mcp_servers` 请求。
+
 ## 测试与实施顺序
 
 1. 为 `ChatStreamRequest` 增加字段及校验测试。
@@ -104,7 +119,7 @@ ChatStreamRequest
 - [DONE:4] 已补充流式 MCP 选择、兼容行为和服务配置测试。
 - [DONE:5] 定向测试已通过；仓库中两个既有 MCP 测试因原有 fixture/依赖版本不匹配失败，
   未在本次范围内修改。
-- [DONE:6] 前端适配方案将在本次实现验收后单独输出。
+- [DONE:6] 已新增 `GET /llm/v1/mcp/servers` 服务列表接口及测试。
+- [DONE:7] 前端适配方案已单独输出。
 
-本设计已确认，后端实现范围仅限 `/chat/stream` 及其测试；前端方案在测试通过
-后单独输出。
+本设计已确认，后端实现范围为 `/chat/stream`、MCP 服务列表只读接口及其测试。
