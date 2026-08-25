@@ -8,7 +8,7 @@ embedding_models:
 chat_models:
   - name: "deepseek-v4-pro"
     status: "active"
-  - name: "deepseek-v4-flash"
+  - name: "deepseek-v4-flash-0731"
     status: "active"
   - name: "qwen3.7-flash"
     status: "active"
