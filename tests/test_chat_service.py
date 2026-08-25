@@ -10,6 +10,7 @@ from langchain.schema import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy.orm import Session
 
 from app.services.chat_service import ChatService
+from app.utils.config import config
 
 # 添加 patch 到导入，以便在测试中使用
 
@@ -611,6 +612,56 @@ async def test_chat_with_agent_with_mcp_tools(service, mock_agent):
             )
 
             assert result["response"] == "这是Agent的回复"
+
+
+@pytest.mark.asyncio
+async def test_chat_with_agent_passes_configured_recursion_limit(service):
+    """非流式 Agent 应将配置的 LangGraph 递归预算传入 ainvoke。"""
+    agent = MagicMock()
+    agent.ainvoke = AsyncMock(
+        return_value={"messages": [AIMessage(content="这是Agent的回复")]}
+    )
+
+    with patch("app.services.chat_service.create_react_agent", return_value=agent):
+        with patch.object(service, "_create_llm"):
+            result = await service.chat_with_agent(
+                prompt="你是一个助手",
+                query="调用工具后回答",
+                mcp_tools=[MagicMock(name="calculator")],
+                use_memory=False,
+            )
+
+    assert result["response"] == "这是Agent的回复"
+    invoke_config = agent.ainvoke.call_args.kwargs["config"]
+    assert invoke_config["recursion_limit"] == config.MCP_AGENT_RECURSION_LIMIT
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_passes_configured_recursion_limit(service):
+    """流式 Agent 应将配置的 LangGraph 递归预算传入 astream。"""
+    agent = MagicMock()
+
+    async def empty_stream(*_args, **_kwargs):
+        if False:
+            yield None
+
+    agent.astream = MagicMock(return_value=empty_stream())
+
+    with patch("app.services.chat_service.create_react_agent", return_value=agent):
+        with patch.object(service, "_create_llm"):
+            events = [
+                event
+                async for event in service.chat_stream(
+                    prompt="你是一个助手",
+                    query="调用工具后回答",
+                    mcp_tools=[MagicMock(name="calculator")],
+                    use_memory=False,
+                )
+            ]
+
+    assert events == []
+    stream_config = agent.astream.call_args.kwargs["config"]
+    assert stream_config["recursion_limit"] == config.MCP_AGENT_RECURSION_LIMIT
 
 
 @pytest.mark.asyncio

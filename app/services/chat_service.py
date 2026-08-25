@@ -20,6 +20,7 @@ from langgraph.prebuilt import create_react_agent
 from sqlalchemy.orm import Session
 
 from ..dao.chat_dao import ChatDAO
+from ..utils.config import config
 from ..utils.handler import MCPToolLoggingHandler
 from .base_service import BaseService
 from .database_service import DatabaseService
@@ -582,7 +583,11 @@ class ChatService(BaseService):
                 )
                 result = await self._await_with_timeout(
                     agent.ainvoke(
-                        {"messages": messages}, config={"callbacks": [handler]}
+                        {"messages": messages},
+                        config={
+                            "callbacks": [handler],
+                            "recursion_limit": config.MCP_AGENT_RECURSION_LIMIT,
+                        },
                     ),
                     timeout_seconds,
                 )
@@ -735,7 +740,10 @@ class ChatService(BaseService):
             )
             async for msg_chunk, _meta in agent.astream(
                 {"messages": messages},
-                config={"callbacks": [handler]},
+                config={
+                    "callbacks": [handler],
+                    "recursion_limit": config.MCP_AGENT_RECURSION_LIMIT,
+                },
                 stream_mode="messages",
             ):
                 msg_type = getattr(msg_chunk, "type", "")

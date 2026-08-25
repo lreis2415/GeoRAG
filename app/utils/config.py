@@ -71,6 +71,18 @@ def setup_logging():
         third_party_logger.setLevel(level)
 
 
+def _bounded_int_env(name: str, default: int, maximum: int) -> int:
+    """Read a positive bounded integer setting from the environment."""
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if value < 1 or value > maximum:
+        raise ValueError(f"{name} must be between 1 and {maximum}")
+    return value
+
+
 # 配置日志
 setup_logging()
 
@@ -96,6 +108,11 @@ class AppConfig:
     API_PREFIX = "/llm/v1"
     REDOC_URL = None
     MCP_AGENT_TIMEOUT_SECONDS = float(os.getenv("MCP_AGENT_TIMEOUT_SECONDS", "300"))
+    # LangGraph counts model/tool graph supersteps, not only MCP calls. Keep a
+    # finite upper bound so a tool loop cannot run indefinitely.
+    MCP_AGENT_RECURSION_LIMIT = _bounded_int_env(
+        "MCP_AGENT_RECURSION_LIMIT", default=50, maximum=100
+    )
 
     # 响应状态码
     SUCCESS_CODE = 2000
