@@ -8,7 +8,7 @@ import json
 import logging
 import uuid
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query, Security
 from fastapi.responses import StreamingResponse
@@ -31,6 +31,8 @@ from app.utils.models import (
     ChatInitResponse,
     ChatRequest,
     ChatResponse,
+    ChatStreamRequest,
+    RenameSessionRequest,
     SessionsResponse,
     StandardResponse,
 )
@@ -266,9 +268,40 @@ def _sse_payload(event: Dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
+async def _resolve_stream_mcp_tools(
+    request: ChatStreamRequest,
+    credentials: Optional[HTTPAuthorizationCredentials],
+    mcp_service: MCPService,
+) -> List:
+    """Resolve MCP tools for the streaming endpoint without changing /chat."""
+    if request.use_mcp is False:
+        if request.mcp_servers is not None:
+            raise ValueError("mcp_servers requires use_mcp=true")
+        return []
+
+    if request.mcp_servers is not None and request.use_mcp is not True:
+        raise ValueError("mcp_servers requires use_mcp=true")
+
+    explicit_mcp = request.use_mcp is True
+    if not mcp_service.is_mcp_initialized():
+        if explicit_mcp:
+            raise RuntimeError("MCP service is not initialized")
+        return []
+
+    token = credentials.credentials if credentials else None
+    if not explicit_mcp and not token:
+        return []
+
+    return await mcp_service.get_mcp_tools_for_token(
+        token,
+        server_names=request.mcp_servers,
+        raise_on_error=explicit_mcp,
+    )
+
+
 @router.post("/chat/stream", tags=["聊天对话"])
 async def chat_stream(
-    request: ChatRequest,
+    request: ChatStreamRequest,
     credentials: HTTPAuthorizationCredentials = Security(http_bearer),
     current_user: CurrentUser = Depends(get_current_user),
     chat_service: ChatService = Depends(get_chat_service),
@@ -359,16 +392,17 @@ async def chat_stream(
             request.use_memory,
         )
 
-        # 获取 MCP 工具（使用依赖注入的服务，已在应用启动时初始化）
-        mcp_tools = []
-        if mcp_service.is_mcp_initialized():
-            token = credentials.credentials if credentials else None
-            if token:
-                mcp_tools = await mcp_service.get_mcp_tools_for_token(token)
-            else:
-                mcp_tools = []
-            if mcp_tools:
-                logger.info(f"MCP 工具列表: {[tool.name for tool in mcp_tools]}")
+        # 仅流式接口支持按请求控制 MCP；普通 /chat 保持旧逻辑不变。
+        mcp_tools = await _resolve_stream_mcp_tools(request, credentials, mcp_service)
+        logger.info(
+            "流式 MCP 选择: request_id=%s use_mcp=%s servers=%s tool_count=%s",
+            request_id,
+            request.use_mcp,
+            request.mcp_servers or "<all>",
+            len(mcp_tools),
+        )
+        if mcp_tools:
+            logger.info(f"MCP 工具列表: {[tool.name for tool in mcp_tools]}")
 
         timeout_seconds = config.MCP_AGENT_TIMEOUT_SECONDS
 
@@ -656,6 +690,40 @@ async def clear_all_sessions(
         logger.error(f"清空会话失败: {e}")
         return error_response(
             message=f"Failed to clear chat sessions: {safe_error_message(e)}", code=5013
+        )
+
+
+@router.post(
+    "/chat/sessions/{session_id}/rename",
+    response_model=StandardResponse[None],
+    tags=["聊天对话"],
+)
+async def rename_chat_session(
+    session_id: str,
+    request: RenameSessionRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    重命名指定会话
+    """
+    try:
+        title = request.title.strip()
+        if not title:
+            return error_response(message="会话标题不能为空", code=4002)
+
+        renamed = chat_dao.update_session_title(
+            db, session_id, title, user_id=current_user.user_id
+        )
+
+        if not renamed:
+            return error_response(message="Session not found", code=4004)
+
+        return success_response(message="会话已重命名")
+    except Exception as e:
+        logger.error(f"重命名会话失败: {e}")
+        return error_response(
+            message=f"Failed to rename chat session: {safe_error_message(e)}", code=5014
         )
 
 

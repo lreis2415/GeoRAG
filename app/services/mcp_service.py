@@ -98,15 +98,34 @@ class MCPService(BaseService):
         """
         return self.mcp_client
 
-    def _build_mcp_config_with_bearer(self, token: str) -> Dict[str, Any]:
+    def _select_mcp_config(
+        self, server_names: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Return a validated copy of the configured MCP server subset."""
+        config_copy: Dict[str, Any] = deepcopy(MCP_CONFIG)
+        if server_names is None:
+            return config_copy
+        if not server_names:
+            raise ValueError("mcp_servers must contain at least one server")
+
+        unknown_servers = [name for name in server_names if name not in config_copy]
+        if unknown_servers:
+            unknown = ", ".join(unknown_servers)
+            raise ValueError(f"Unknown MCP server(s): {unknown}")
+
+        return {name: config_copy[name] for name in server_names}
+
+    def _build_mcp_config_with_bearer(
+        self, token: Optional[str], server_names: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """
         基于全局 MCP_CONFIG 构建带 Authorization 请求头的配置。
 
         注意：为了避免全局污染，这里会深拷贝配置并仅在副本上写入 headers。
         """
-        config_copy: Dict[str, Any] = deepcopy(MCP_CONFIG)
+        config_copy = self._select_mcp_config(server_names)
         for _, server_cfg in config_copy.items():
-            if isinstance(server_cfg, dict):
+            if token and isinstance(server_cfg, dict):
                 headers = server_cfg.get("headers")
                 if not isinstance(headers, dict):
                     headers = {}
@@ -114,7 +133,12 @@ class MCPService(BaseService):
                 server_cfg["headers"] = headers
         return config_copy
 
-    async def get_mcp_tools_for_token(self, token: str) -> List:
+    async def get_mcp_tools_for_token(
+        self,
+        token: Optional[str],
+        server_names: Optional[List[str]] = None,
+        raise_on_error: bool = False,
+    ) -> List:
         """
         按请求动态构建 MCP 工具（携带 Bearer Token）。
 
@@ -123,20 +147,29 @@ class MCPService(BaseService):
 
         Args:
             token: Bearer token（不含 "Bearer " 前缀）
+            server_names: 要加载的 MCP 服务器名称；省略时加载全部服务器
+            raise_on_error: 连接失败时是否将异常抛给调用方
 
         Returns:
             按 token 构建得到的工具列表。失败时返回空列表。
         """
-        if not token:
+        if not token and server_names is None:
             return self.get_mcp_tools() or []
 
         try:
-            config_with_headers = self._build_mcp_config_with_bearer(token)
+            config_with_headers = self._build_mcp_config_with_bearer(
+                token, server_names
+            )
             ephemeral_client = MultiServerMCPClient(config_with_headers)
             tools = await ephemeral_client.get_tools()
-            self.log_info(f"按请求构建 MCP 工具成功，共 {len(tools)} 个工具")
+            selected = list(config_with_headers)
+            self.log_info(
+                f"按请求构建 MCP 工具成功，服务器={selected}，工具数={len(tools)}"
+            )
             return tools
         except Exception as e:
+            if raise_on_error:
+                raise
             inner: BaseException = e
             if hasattr(e, "exceptions") and e.exceptions:  # type: ignore[union-attr]
                 inner = e.exceptions[0]  # type: ignore[union-attr]

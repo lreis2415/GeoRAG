@@ -71,6 +71,21 @@ class ChatRequest(BaseModel):
     )
 
 
+class ChatStreamRequest(ChatRequest):
+    """流式聊天请求模型（额外支持 MCP 开关和服务器筛选）。"""
+
+    use_mcp: Optional[bool] = Field(
+        None,
+        description="是否使用 MCP；未提供时保持旧的自动启用行为",
+        example=True,
+    )
+    mcp_servers: Optional[List[str]] = Field(
+        None,
+        description="要使用的 MCP 服务器名称；未提供时使用全部已配置服务器",
+        example=["pygeomodels"],
+    )
+
+
 class HealthResponse(BaseModel):
     """健康检查响应模型"""
 
@@ -100,6 +115,12 @@ class ChatResponse(BaseModel):
     session_id: Optional[str] = Field(None, description="会话ID")
     message_count: Optional[int] = Field(None, description="消息数量")
     tool_calls: Optional[List[Dict[str, Any]]] = Field(None, description="工具调用信息")
+
+
+class RenameSessionRequest(BaseModel):
+    """会话重命名请求模型"""
+
+    title: str = Field(..., min_length=1, max_length=100, description="新的会话标题")
 
 
 class ChatInitResponse(BaseModel):

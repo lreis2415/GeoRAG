@@ -2,13 +2,13 @@
 
 ## 目标与范围
 
-第一版为 Chat 接口增加两个请求字段：
+第一版仅为流式 Chat 接口 `/chat/stream` 增加两个请求字段：
 
 - `use_mcp`：是否启用 MCP。
 - `mcp_servers`：启用哪些已配置的 MCP 服务器。
 
-本版本不支持单工具筛选、会话级 MCP 配置或请求动态传入 MCP URL。
-`/chat` 与 `/chat/stream` 使用同一套选择逻辑。
+普通 Chat 接口 `/chat` 保持现有请求模型和自动 MCP 行为不变。本版本不支持
+单工具筛选、会话级 MCP 配置或请求动态传入 MCP URL。
 
 ## 兼容性语义
 
@@ -31,7 +31,8 @@
 
 ## API 模型
 
-在 `ChatRequest` 中增加：
+新增仅供 `/chat/stream` 使用的 `ChatStreamRequest`（继承现有聊天字段），在该
+模型中增加：
 
 ```python
 use_mcp: Optional[bool] = Field(
@@ -60,7 +61,7 @@ mcp_servers: Optional[List[str]] = Field(
 路由层在调用 `ChatService` 前统一解析 MCP 选择：
 
 ```text
-ChatRequest
+ChatStreamRequest
   -> 解析 use_mcp / mcp_servers
   -> 校验服务器名称是否在 MCP_CONFIG
   -> MCPService 按服务器子集复制配置
@@ -72,8 +73,8 @@ ChatRequest
 `MCPService.get_mcp_tools_for_token()` 扩展 `server_names` 参数，不能通过
 过滤已加载的全量工具来实现服务器选择，因为这样仍可能连接不应使用的服务器。
 
-建议抽取路由共用的 `resolve_mcp_tools()` 辅助方法，避免普通和流式接口出现
-不同的默认行为。
+仅在流式路由中调用 `resolve_stream_mcp_tools()`。普通 `/chat` 不调用该方法，
+从而避免普通接口的请求模型和行为发生变化。
 
 ## 错误、权限与可观测性
 
@@ -86,12 +87,24 @@ ChatRequest
 
 ## 测试与实施顺序
 
-1. 为 `ChatRequest` 增加字段及校验测试。
+1. 为 `ChatStreamRequest` 增加字段及校验测试。
 2. 为 `MCPService` 增加服务器子集配置和 Token 注入测试。
 3. 测试 `use_mcp=false` 不触发 MCP 初始化或连接。
 4. 测试默认兼容行为、全量服务器和指定服务器三种路径。
 5. 测试未知服务器、空数组和连接失败的错误路径。
-6. 对 `/chat` 与 `/chat/stream` 验证相同的工具选择结果。
-7. 更新 CLI/API 文档和请求示例。
+6. 验证普通 `/chat` 的请求模型和行为没有变化。
+7. 更新流式 API 文档和请求示例。
+8. 所有后端测试通过后，再输出前端适配方案；前端适配不在本次后端实现中。
 
-本设计只固化接口与行为约定，不包含本版本的业务代码实现。
+## 实施状态
+
+- [DONE:1] 已新增仅供 `/chat/stream` 使用的 `ChatStreamRequest`。
+- [DONE:2] 已实现 `use_mcp` 三态兼容逻辑和 `mcp_servers` 服务器筛选。
+- [DONE:3] 已实现选中服务器的 Token 注入与错误传播。
+- [DONE:4] 已补充流式 MCP 选择、兼容行为和服务配置测试。
+- [DONE:5] 定向测试已通过；仓库中两个既有 MCP 测试因原有 fixture/依赖版本不匹配失败，
+  未在本次范围内修改。
+- [DONE:6] 前端适配方案将在本次实现验收后单独输出。
+
+本设计已确认，后端实现范围仅限 `/chat/stream` 及其测试；前端方案在测试通过
+后单独输出。
