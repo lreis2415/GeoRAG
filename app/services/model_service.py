@@ -16,7 +16,7 @@ class ModelService(BaseService):
 
     def __init__(self):
         super().__init__()
-        self.default_embed_model = "text-embedding-v3"
+        self.default_embed_model = "text-embedding-v4"
         self.default_chat_model = "qwen-turbo-latest"
 
     def get_available_embedding_models(self) -> List[str]:
