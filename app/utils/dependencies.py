@@ -13,7 +13,6 @@ from app.services import (
     DocumentService,
     MCPService,
     ModelService,
-    RAGService,
 )
 from app.services.db import SessionLocal
 
@@ -42,12 +41,6 @@ def get_chat_service() -> ChatService:
     """获取聊天服务实例（带 DatabaseService 注入）"""
     database_service = get_database_service()
     return ChatService(database_service=database_service)
-
-
-@lru_cache()
-def get_rag_service() -> RAGService:
-    """获取RAG服务实例"""
-    return RAGService()
 
 
 def get_mcp_service() -> MCPService:

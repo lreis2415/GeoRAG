@@ -99,11 +99,6 @@ def build_parser() -> argparse.ArgumentParser:
         "files", help="list files associated with a knowledge base"
     )
     kb_files.add_argument("kb_id")
-    kb_ask = kb_sub.add_parser("ask", help="ask a question against a knowledge base")
-    kb_ask.add_argument("kb_id")
-    kb_ask.add_argument("--query", required=True)
-    kb_ask.add_argument("--prompt", default=DEFAULT_PROMPT)
-    kb_ask.add_argument("--chat-model")
     kb_delete = kb_sub.add_parser("delete", help="permanently delete a knowledge base")
     kb_delete.add_argument("kb_id")
     kb_delete.add_argument(
@@ -328,21 +323,6 @@ def _handle_kb(
             args,
             lambda client: client.request_json(
                 "GET", f"/knowledge/bases/{args.kb_id}/files"
-            ),
-            logger,
-        )
-    elif args.command == "ask":
-        body = {
-            "db_name": args.kb_id,
-            "query": args.query,
-            "prompt": args.prompt,
-        }
-        if args.chat_model:
-            body["chat_model_name"] = args.chat_model
-        _run_authenticated(
-            args,
-            lambda client: client.request_json(
-                "POST", "/knowledge/ask", json_body=body
             ),
             logger,
         )

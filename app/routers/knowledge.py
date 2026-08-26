@@ -3,14 +3,13 @@
 统一管理知识库和知识文件的API接口
 """
 
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import FileResponse
 
 from app.auth.dependencies import CurrentUser, get_current_user
 from app.models.knowledge_models import (
-    KnowledgeAskRequest,
     KnowledgeBaseCreateResponse,
     KnowledgeBaseFilesResponse,
     KnowledgeBaseInfo,
@@ -20,12 +19,10 @@ from app.models.knowledge_models import (
 from app.services.database_service import DatabaseService
 from app.services.document_service import DocumentService
 from app.services.model_service import ModelService
-from app.services.rag_service import RAGService
 from app.utils.dependencies import (
     get_database_service,
     get_document_service,
     get_model_service,
-    get_rag_service,
 )
 from app.utils.errors import safe_error_message
 from app.utils.models import StandardResponse
@@ -350,62 +347,3 @@ async def delete_knowledge_file(
         return error_response(message=str(e), code=4004)
     except Exception:
         return error_response(message="Failed to delete document", code=5007)
-
-
-# ==================== 知识库问答 ====================
-
-
-@router.post(
-    "/knowledge/ask",
-    tags=["知识库问答"],
-    response_model=StandardResponse[Dict[str, Any]],
-    summary="知识库智能问答（RAG）",
-)
-async def ask_knowledge_base(
-    request: KnowledgeAskRequest,
-    current_user: CurrentUser = Depends(get_current_user),
-    database_service: DatabaseService = Depends(get_database_service),
-    model_service: ModelService = Depends(get_model_service),
-    rag_service: RAGService = Depends(get_rag_service),
-) -> StandardResponse[Dict[str, Any]]:
-    """
-    基于 RAG 技术对指定知识库进行智能问答。
-
-    **流程**：
-    1. 用 `embedding_model` 将 `query` 向量化
-    2. 在 `db_name` 对应的向量库中检索 Top-K 相关片段
-    3. 将检索结果与 `prompt` 拼接后调用 `chat_model_name` 生成答案
-
-    **错误码**：
-    - `4000`：模型不可用或参数错误
-    - `4004`：知识库不存在
-    - `5009`：内部推理错误
-    """
-    try:
-        chat_model_name = (
-            request.chat_model_name or model_service.get_default_chat_model()
-        )
-        if not model_service.validate_chat_model(chat_model_name):
-            return error_response(
-                message=f"Chat model '{chat_model_name}' is not available", code=4000
-            )
-
-        vector_db = database_service.get_vector_db(
-            request.db_name, user_id=current_user.user_id
-        )
-        if not vector_db:
-            return error_response(
-                message=f"Knowledge base '{request.db_name}' not found", code=4004
-            )
-
-        result = rag_service.ask_question(
-            query=request.query,
-            db_name=request.db_name,
-            vector_db=vector_db,
-            chat_model_name=chat_model_name,
-        )
-        return success_response(data=result)
-    except ValueError as e:
-        return error_response(message=str(e), code=4000)
-    except Exception as e:
-        return error_response(message=safe_error_message(e), code=5009)

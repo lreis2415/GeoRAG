@@ -64,33 +64,6 @@ class KnowledgeBaseUpdateRequest(BaseModel):
     description: Optional[str] = Field(None, description="新的描述")
 
 
-class KnowledgeAskRequest(BaseModel):
-    """知识库智能问答请求"""
-
-    prompt: str = Field(
-        ...,
-        description="系统提示词",
-        json_schema_extra={
-            "example": "你是一个地理信息专家助手，请基于提供的知识回答问题。"
-        },
-    )
-    query: str = Field(
-        ...,
-        description="用户查询问题",
-        json_schema_extra={"example": "什么是数字高程模型（DEM）？"},
-    )
-    db_name: str = Field(
-        ...,
-        description="知识库名称（集合 ID）",
-        json_schema_extra={"example": "geo_knowledge"},
-    )
-    chat_model_name: Optional[str] = Field(
-        None,
-        description="聊天模型名称，不传时使用默认模型",
-        json_schema_extra={"example": "qwen-turbo-latest"},
-    )
-
-
 # ==================== 响应模型 ====================
 
 

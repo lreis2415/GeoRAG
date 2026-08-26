@@ -6,7 +6,6 @@ app/models 包
 
 from .chat_models import ChatMessage, ChatSession
 from .knowledge_models import (
-    KnowledgeAskRequest,
     KnowledgeBaseCreateRequest,
     KnowledgeBaseCreateResponse,
     KnowledgeBaseFileInfo,
@@ -25,7 +24,6 @@ __all__ = [
     "KnowledgeBaseFileInfo",
     "KnowledgeBaseCreateRequest",
     "KnowledgeBaseUpdateRequest",
-    "KnowledgeAskRequest",
     "KnowledgeBaseListResponse",
     "KnowledgeBaseCreateResponse",
     "KnowledgeBaseFilesResponse",

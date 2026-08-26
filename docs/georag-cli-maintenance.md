@@ -76,15 +76,15 @@ CLI 默认将每次 API 调用追加到结构化 JSONL 日志：
 ```
 
 每条记录包含 run id、服务、HTTP 方法和 path、开始/结束时间、耗时、状态码、
-请求参数、原始 JSON 响应和错误信息。`kb ask` 的 query、prompt、知识库名、
-聊天模型和返回内容会保留，适合比较 RAG 参数。multipart 上传只记录文件名
+请求参数、原始 JSON 响应和错误信息。携带 `db_name` 的 `chat ask` 请求会保留
+query、prompt、知识库名、聊天模型和返回内容，适合比较 RAG 参数。multipart 上传只记录文件名
 和大小，不记录文件内容。
 
 指定实验日志目录：
 
 ```bash
-georag --log-dir ./logs --output json kb ask <kb-id> \
-  --chat-model qwen3.7-flash --query "..."
+georag --log-dir ./logs --output json chat ask \
+  --db-name <kb-id> --chat-model qwen3.7-flash --query "..."
 ```
 
 也可以设置 `GEORAG_LOG_DIR`。命令行的 `--log-dir` 优先级高于环境变量；
@@ -92,10 +92,9 @@ georag --log-dir ./logs --output json kb ask <kb-id> \
 password、token、Authorization、API key、secret 等字段会统一替换为
 `[REDACTED]`。日志写入失败只输出 stderr 警告，不会覆盖 API 调用结果。
 
-CLI 能保存服务端实际返回的 RAG 结果，但当前 `/knowledge/ask` API 只返回
-`data.response`，没有单独暴露 top-k 文档、相似度分数或 token 用量。若调优
-需要这些内部检索指标，需要先扩展 GeoRAG API 的响应结构；CLI 日志会自动
-记录扩展后的响应字段。
+CLI 会记录 `/chat` 返回的 RAG 结果及 `data.sources`；每个来源包含原始文件、
+chunk id 和正文。相似度分数和 token 用量当前仍未暴露，若调优需要这些指标，
+需要再扩展 Chat API 的响应结构；CLI 日志会自动记录扩展后的字段。
 
 ## 4. 认证和凭据存储
 

@@ -8,13 +8,11 @@ from .database_service import DatabaseService
 from .document_service import DocumentService
 from .mcp_service import MCPService
 from .model_service import ModelService
-from .rag_service import RAGService
 
 __all__ = [
     "ModelService",
     "DatabaseService",
     "DocumentService",
     "ChatService",
-    "RAGService",
     "MCPService",
 ]

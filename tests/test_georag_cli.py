@@ -139,7 +139,7 @@ def test_api_client_logs_timeout(tmp_path):
     def handler(request):
         raise httpx.ReadTimeout("upstream took too long", request=request)
 
-    logger = RequestLogger(tmp_path, command="kb.ask")
+    logger = RequestLogger(tmp_path, command="chat.ask")
     with ApiClient(
         Profile(),
         token="access-token",
@@ -148,15 +148,20 @@ def test_api_client_logs_timeout(tmp_path):
     ) as client:
         with pytest.raises(ConnectivityError, match="timed out"):
             client.request_json(
-                "POST",
-                "/knowledge/ask",
-                json_body={"db_name": "demo", "query": "question"},
+                "POST", "/chat", json_body={"db_name": "demo", "query": "question"}
             )
 
     record = json.loads(logger.path.read_text().splitlines()[0])
-    assert record["path"] == "/knowledge/ask"
+    assert record["path"] == "/chat"
     assert record["status_code"] is None
     assert record["error"]["type"] == "timeout"
+
+
+def test_kb_ask_command_is_removed():
+    parser = cli.build_parser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["kb", "ask", "demo", "--query", "question"])
 
 
 def test_chat_ask_omits_optional_knowledge_base(monkeypatch, capsys):
