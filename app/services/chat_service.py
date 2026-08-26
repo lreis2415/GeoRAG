@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import hashlib
 import os
 import re
 import uuid
@@ -13,7 +14,6 @@ from typing import AsyncIterator, Callable, Dict, List, Optional
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
 from langchain.schema.messages import BaseMessage
-from langchain_core.runnables import RunnableLambda
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
@@ -494,6 +494,49 @@ class ChatService(BaseService):
             return ChatOllama(model=chat_model_name, temperature=0.1, verbose=True)
 
     @staticmethod
+    def _source_from_document(document) -> Dict[str, str]:
+        """Build a stable, client-safe source record for one retrieved chunk."""
+        metadata = document.metadata or {}
+        file_path = str(metadata.get("source") or "")
+        file_name = os.path.basename(file_path) or "unknown"
+        chunk_id = metadata.get("chunk_id") or getattr(document, "id", None)
+        if not chunk_id:
+            digest_input = f"{file_path}\n{document.page_content}".encode("utf-8")
+            chunk_id = hashlib.sha256(digest_input).hexdigest()[:16]
+        return {
+            "file_name": file_name,
+            "file_path": file_path,
+            "chunk_id": str(chunk_id),
+            "content": document.page_content,
+        }
+
+    async def _retrieve_context(
+        self, db_name: str, query: str, user_id: Optional[str]
+    ) -> tuple[str, List[Dict[str, str]]]:
+        """Always retrieve knowledge-base context before a RAG answer is generated."""
+        if not self._database_service:
+            raise ValueError(
+                "DatabaseService is not initialized; vector database is unavailable"
+            )
+
+        vector_db = self._database_service.get_vector_db(db_name, user_id=user_id)
+        if not vector_db:
+            raise ValueError(f"Knowledge base '{db_name}' not found")
+
+        vector_store = vector_db.get_vector_store()
+        retriever = vector_store.as_retriever(
+            search_type="similarity", search_kwargs={"k": 4}
+        )
+        loop = asyncio.get_running_loop()
+        documents = await loop.run_in_executor(None, retriever.invoke, query)
+        sources = [self._source_from_document(document) for document in documents]
+        context = "\n\n".join(
+            f"【片段 {index} | source={source['file_name']}】\n{source['content']}"
+            for index, source in enumerate(sources, start=1)
+        )
+        return context, sources
+
+    @staticmethod
     async def _await_with_timeout(awaitable, timeout_seconds: Optional[float]):
         """Await an operation with Python 3.9-compatible timeout support."""
         if timeout_seconds is None:
@@ -557,7 +600,7 @@ class ChatService(BaseService):
 
         try:
             # 1-4. 构建工具列表与消息列表（与 chat_stream 共享）
-            tools, messages = self._build_tools_and_messages(
+            tools, messages, sources = await self._build_tools_and_messages(
                 prompt=prompt,
                 query=query,
                 use_memory=use_memory,
@@ -566,6 +609,13 @@ class ChatService(BaseService):
                 mcp_tools=mcp_tools,
                 user_id=user_id,
             )
+
+            if db_name and not sources:
+                return {
+                    "response": "知识库中未检索到足够信息，无法基于现有上下文回答。",
+                    "session_id": session_id,
+                    "sources": [],
+                }
 
             # 5. 创建并运行 Agent
             if tools:
@@ -608,13 +658,17 @@ class ChatService(BaseService):
                 len(ai_response),
             )
 
-            return {"response": ai_response, "session_id": session_id}
+            return {
+                "response": ai_response,
+                "session_id": session_id,
+                "sources": sources,
+            }
 
         except Exception:
             self.logger.exception("聊天对话失败: request_id=%s", request_id)
             raise
 
-    def _build_tools_and_messages(
+    async def _build_tools_and_messages(
         self,
         prompt: str,
         query: str,
@@ -623,57 +677,29 @@ class ChatService(BaseService):
         db_name: Optional[str],
         mcp_tools: Optional[List],
         user_id: Optional[str],
-    ) -> tuple[List, List]:
+    ) -> tuple[List, List, List[Dict[str, str]]]:
         """构建工具列表与消息列表（chat_with_agent 与 chat_stream 共享）。"""
-        # 1. 构建工具列表
         tools = []
+        sources = []
+        rag_context = ""
 
-        # 2. 如果提供了 db_name，添加检索工具
+        # 指定知识库时，检索是确定性前置步骤而非 Agent 可选工具。
         if db_name:
-            if not self._database_service:
-                raise ValueError(
-                    "DatabaseService is not initialized; vector database is "
-                    "unavailable"
-                )
-
-            vector_db = self._database_service.get_vector_db(db_name, user_id=user_id)
-            if not vector_db:
-                raise ValueError(f"Knowledge base '{db_name}' not found")
-
-            # 创建检索工具
-            vector_store = vector_db.get_vector_store()
-            retriever = vector_store.as_retriever(
-                search_type="similarity", search_kwargs={"k": 2}
-            )
-
-            # 将同步检索器包装为异步
-            async def async_retrieve(query: str) -> str:
-                """异步检索函数"""
-                docs = retriever.invoke(query)
-                # 将检索结果格式化为字符串
-                if docs:
-                    return "\n\n".join(
-                        [
-                            f"【document {i + 1}】\n{doc.page_content}"
-                            for i, doc in enumerate(docs)
-                        ]
-                    )
-                return "未找到相关信息"
-
-            # 创建异步检索工具
-            retrieval_tool = RunnableLambda(async_retrieve).as_tool(
-                name="info_retriever",
-                description="信息检索工具，从知识库中查找相关信息。输入：查询问题，输出：相关文档内容。",
-            )
-            tools.append(retrieval_tool)
-
-        # 3. 添加 MCP 工具（如果提供）
-        if mcp_tools:
+            rag_context, sources = await self._retrieve_context(db_name, query, user_id)
+        elif mcp_tools:
+            # RAG 回答只允许以检索上下文为依据，因此不与 MCP 工具混用。
             tools.extend(mcp_tools)
 
-        # 4. 构建消息列表
-        messages = []
-        messages.append(SystemMessage(content=prompt))
+        system_prompt = prompt
+        if db_name:
+            system_prompt += (
+                "\n\n你正在执行基于知识库的问答。只能依据下方“检索上下文”回答，"
+                "不得使用自身知识、对话历史或任何外部工具补充事实。"
+                "若上下文无法支持答案，必须明确说明“知识库中未检索到足够信息”。\n\n"
+                f"<检索上下文>\n{rag_context}\n</检索上下文>"
+            )
+
+        messages = [SystemMessage(content=system_prompt)]
 
         if use_memory and history:
             for msg in history:
@@ -681,7 +707,7 @@ class ChatService(BaseService):
 
         messages.append(HumanMessage(content=query))
 
-        return tools, messages
+        return tools, messages, sources
 
     async def chat_stream(
         self,
@@ -714,7 +740,7 @@ class ChatService(BaseService):
         if not query:
             raise ValueError("query is required")
 
-        tools, messages = self._build_tools_and_messages(
+        tools, messages, sources = await self._build_tools_and_messages(
             prompt=prompt,
             query=query,
             use_memory=use_memory,
@@ -723,6 +749,15 @@ class ChatService(BaseService):
             mcp_tools=mcp_tools,
             user_id=user_id,
         )
+
+        if db_name:
+            yield {"type": "sources", "sources": sources}
+            if not sources:
+                yield {
+                    "type": "text",
+                    "content": "知识库中未检索到足够信息，无法基于现有上下文回答。",
+                }
+                return
 
         llm = self._create_llm(chat_model_name)
 

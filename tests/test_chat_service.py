@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain.schema import AIMessage, HumanMessage, SystemMessage
+from langchain_core.documents import Document
 from sqlalchemy.orm import Session
 
 from app.services.chat_service import ChatService
@@ -67,10 +68,12 @@ def mock_vector_db():
     vector_db = MagicMock()
     vector_store = MagicMock()
     retriever = MagicMock()
-    tool = MagicMock()
-    tool.name = "info_retriever"
-
-    retriever.as_tool.return_value = tool
+    retriever.invoke.return_value = [
+        Document(
+            page_content="数字地形模型用于表达地表高程。",
+            metadata={"source": "/data/documents/terrain.txt", "chunk_id": "chunk-1"},
+        )
+    ]
     vector_store.as_retriever.return_value = retriever
     vector_db.get_vector_store.return_value = vector_store
     return vector_db
@@ -594,7 +597,77 @@ async def test_chat_with_agent_with_rag(
         )
 
         assert result["response"] == "这是AI的回复"
-        mock_database_service.get_vector_db.assert_called_once_with("geo_knowledge")
+        assert result["sources"] == [
+            {
+                "file_name": "terrain.txt",
+                "file_path": "/data/documents/terrain.txt",
+                "chunk_id": "chunk-1",
+                "content": "数字地形模型用于表达地表高程。",
+            }
+        ]
+        mock_database_service.get_vector_db.assert_called_once_with(
+            "geo_knowledge", user_id=None
+        )
+        retriever = mock_vector_db.get_vector_store.return_value.as_retriever
+        retriever.assert_called_once_with(
+            search_type="similarity", search_kwargs={"k": 4}
+        )
+        messages = mock_llm.ainvoke.call_args.args[0]
+        assert "只能依据下方“检索上下文”回答" in messages[0].content
+        assert "chunk_id" not in messages[0].content
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_emits_sources_before_rag_answer(
+    service_with_db, mock_vector_db, mock_database_service
+):
+    """流式 RAG 在输出正文前发送来源，便于客户端建立引用视图。"""
+    mock_database_service.get_vector_db.return_value = mock_vector_db
+    llm = MagicMock()
+
+    async def stream(_messages):
+        yield AIMessage(content="数字地形模型用于表达地表高程。")
+
+    llm.astream = MagicMock(return_value=stream([]))
+    with patch.object(service_with_db, "_create_llm", return_value=llm):
+        events = [
+            event
+            async for event in service_with_db.chat_stream(
+                prompt="你是一个地理专家",
+                query="什么是数字地形模型？",
+                db_name="geo_knowledge",
+                use_memory=False,
+            )
+        ]
+
+    assert events[0]["type"] == "sources"
+    assert events[0]["sources"][0]["chunk_id"] == "chunk-1"
+    assert events[1] == {
+        "type": "text",
+        "content": "数字地形模型用于表达地表高程。",
+    }
+
+
+@pytest.mark.asyncio
+async def test_chat_with_agent_returns_grounded_no_answer_when_no_chunk_matches(
+    service_with_db, mock_llm, mock_vector_db, mock_database_service
+):
+    """无召回时不调用模型，避免生成超出知识库的内容。"""
+    mock_database_service.get_vector_db.return_value = mock_vector_db
+    retriever = mock_vector_db.get_vector_store.return_value.as_retriever.return_value
+    retriever.invoke.return_value = []
+
+    with patch.object(service_with_db, "_create_llm", return_value=mock_llm):
+        result = await service_with_db.chat_with_agent(
+            prompt="你是一个地理专家",
+            query="不存在的概念是什么？",
+            db_name="geo_knowledge",
+            use_memory=False,
+        )
+
+    assert result["sources"] == []
+    assert "未检索到足够信息" in result["response"]
+    mock_llm.ainvoke.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -665,24 +738,24 @@ async def test_chat_stream_passes_configured_recursion_limit(service):
 
 
 @pytest.mark.asyncio
-async def test_chat_with_agent_with_rag_and_tools(
-    service_with_db, mock_agent, mock_vector_db, mock_database_service
+async def test_chat_with_agent_with_rag_ignores_mcp_tools(
+    service_with_db, mock_llm, mock_vector_db, mock_database_service
 ):
-    """测试对话 + RAG + MCP 工具模式"""
+    """RAG 模式只以检索上下文为依据，不注册 MCP 工具。"""
     mock_database_service.get_vector_db.return_value = mock_vector_db
     mcp_tools = [MagicMock(name="calculator")]
 
-    with patch("app.services.chat_service.create_react_agent", return_value=mock_agent):
-        with patch.object(service_with_db, "_create_llm"):
-            result = await service_with_db.chat_with_agent(
-                prompt="你是一个地理专家",
-                query="请分析地形数据",
-                db_name="geo_knowledge",
-                mcp_tools=mcp_tools,
-                use_memory=False,
-            )
+    with patch.object(service_with_db, "_create_llm", return_value=mock_llm):
+        result = await service_with_db.chat_with_agent(
+            prompt="你是一个地理专家",
+            query="请分析地形数据",
+            db_name="geo_knowledge",
+            mcp_tools=mcp_tools,
+            use_memory=False,
+        )
 
-            assert result["response"] == "这是Agent的回复"
+        assert result["response"] == "这是AI的回复"
+        mock_llm.ainvoke.assert_called_once()
 
 
 @pytest.mark.asyncio

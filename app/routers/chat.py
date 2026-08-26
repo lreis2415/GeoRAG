@@ -339,6 +339,7 @@ async def chat_stream(
 
     事件格式：
         data: {"type": "text", "content": "..."}    增量文本
+        data: {"type": "sources", "sources": [...]}  RAG 引用来源
         data: {"type": "tool", "name": "..."}      工具调用
         data: {"type": "done", "response": "...",
                "session_id": "...", "message_count": n}  结束
@@ -435,6 +436,7 @@ async def chat_stream(
             terminal_recorded = False
             assistant_persisted = False
             tool_states: Dict[str, Dict] = {}
+            sources: List[Dict] = []
             last_tool_sequence = 0
 
             def record_run(status: str, error: Optional[object] = None):
@@ -461,8 +463,10 @@ async def chat_stream(
                 if isinstance(sequence, int) and sequence > last_tool_sequence:
                     last_tool_sequence = sequence
                 previous = tool_states.get(call_id)
-                if previous and isinstance(sequence, int) and sequence <= previous.get(
-                    "sequence", 0
+                if (
+                    previous
+                    and isinstance(sequence, int)
+                    and sequence <= previous.get("sequence", 0)
                 ):
                     return
                 if previous and previous.get("status") in {"succeeded", "failed"}:
@@ -604,6 +608,9 @@ async def chat_stream(
                     if event["type"] == "text":
                         final_response += event["content"]
                         yield _sse_payload(event)
+                    elif event["type"] == "sources":
+                        sources = event["sources"]
+                        yield _sse_payload(event)
                     elif event["type"] == "tool":
                         remember_tool(event)
                         yield _sse_payload(event)
@@ -619,6 +626,7 @@ async def chat_stream(
                         "response": final_response,
                         "session_id": session_id,
                         "message_count": message_count,
+                        "sources": sources,
                     }
                 )
             except asyncio.CancelledError:

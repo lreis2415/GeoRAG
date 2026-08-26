@@ -33,19 +33,6 @@ class StandardResponse(BaseModel, Generic[T]):
         }
 
 
-class AskRequest(BaseModel):
-    """RAG问答请求模型（保留向后兼容，推荐改用 app.models.KnowledgeAskRequest）"""
-
-    prompt: str = Field(
-        ..., description="系统提示词", example="你是一个地理信息专家助手"
-    )
-    query: str = Field(..., description="用户查询问题", example="什么是数字地形模型？")
-    db_name: str = Field(..., description="知识库名称", example="geo_knowledge")
-    chat_model_name: Optional[str] = Field(
-        None, description="聊天模型名称", example="qwen-turbo-latest"
-    )
-
-
 class ChatRequest(BaseModel):
     """聊天对话请求模型"""
 
@@ -128,6 +115,9 @@ class ChatResponse(BaseModel):
     session_id: Optional[str] = Field(None, description="会话ID")
     message_count: Optional[int] = Field(None, description="消息数量")
     tool_calls: Optional[List[Dict[str, Any]]] = Field(None, description="工具调用信息")
+    sources: Optional[List["MessageSource"]] = Field(
+        None, description="本次 RAG 回答使用的知识库片段"
+    )
 
 
 class RenameSessionRequest(BaseModel):
@@ -147,6 +137,7 @@ class MessageSource(BaseModel):
 
     file_name: str = Field(..., description="文件名")
     file_path: str = Field(..., description="文件路径")
+    chunk_id: str = Field(..., description="知识库片段唯一标识")
     content: str = Field(..., description="页面内容摘要")
 
 
@@ -200,7 +191,6 @@ class ChatHistoryResponse(BaseModel):
 # 此处保留别名，避免其他模块的 import 失效
 
 from app.models.knowledge_models import (  # noqa: E402, F401
-    KnowledgeAskRequest,
     KnowledgeBaseCreateRequest,
     KnowledgeBaseCreateResponse,
     KnowledgeBaseFileInfo,

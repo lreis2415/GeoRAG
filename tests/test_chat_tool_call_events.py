@@ -1,6 +1,6 @@
 """Tests for safe streamed MCP tool-call lifecycle events and replay data."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain.schema import AIMessage
@@ -87,7 +87,9 @@ async def test_chat_stream_emits_safe_failed_tool_event_without_raw_output():
     agent.astream = MagicMock(return_value=stream())
 
     with patch.object(
-        service, "_build_tools_and_messages", return_value=([MagicMock()], [])
+        service,
+        "_build_tools_and_messages",
+        new=AsyncMock(return_value=([MagicMock()], [], [])),
     ):
         with patch.object(service, "_create_llm"):
             with patch(
@@ -103,9 +105,7 @@ async def test_chat_stream_emits_safe_failed_tool_event_without_raw_output():
                     )
                 ]
 
-    tool_statuses = [
-        event["status"] for event in events if event["type"] == "tool"
-    ]
+    tool_statuses = [event["status"] for event in events if event["type"] == "tool"]
     assert tool_statuses == [
         "started",
         "failed",
@@ -121,9 +121,7 @@ async def test_chat_stream_emits_safe_failed_tool_event_without_raw_output():
 def test_tracker_keeps_safe_concrete_tool_identifier_for_display():
     tracker = ToolCallTracker()
 
-    event = tracker.start(
-        [{"id": "call_04", "name": "list_models_by_category"}]
-    )[0]
+    event = tracker.start([{"id": "call_04", "name": "list_models_by_category"}])[0]
 
     assert event["tool_key"] == "mcp.tool"
     assert event["tool_name"] == "list_models_by_category"
@@ -202,9 +200,7 @@ def test_chat_message_persists_only_safe_terminal_tool_call_records():
             ],
         )
 
-        history = ChatDAO.get_session_history(
-            db, "session-1", user_id="user-1"
-        )
+        history = ChatDAO.get_session_history(db, "session-1", user_id="user-1")
         assert history[0]["generation_status"] == "failed"
         assert history[0]["tool_calls"] == [
             {
