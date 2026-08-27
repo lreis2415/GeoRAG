@@ -480,7 +480,7 @@ class ChatService(BaseService):
         api_base = os.environ.get("OPENAI_API_BASE")
 
         if not chat_model_name:
-            chat_model_name = "qwen-turbo-latest"
+            chat_model_name = os.environ.get("DEFAULT_CHAT_MODEL", "qwen3.7-plus")
 
         if use_api:
             return ChatOpenAI(
@@ -583,7 +583,7 @@ class ChatService(BaseService):
             ValueError: 参数验证失败
         """
         if not chat_model_name:
-            chat_model_name = "qwen-turbo-latest"
+            chat_model_name = os.environ.get("DEFAULT_CHAT_MODEL", "qwen3.7-plus")
 
         # 验证必要参数
         if not prompt:
@@ -733,7 +733,7 @@ class ChatService(BaseService):
             {"type": "tool", ...}                工具调用生命周期事件
         """
         if not chat_model_name:
-            chat_model_name = "qwen-turbo-latest"
+            chat_model_name = os.environ.get("DEFAULT_CHAT_MODEL", "qwen3.7-plus")
 
         if not prompt:
             raise ValueError("prompt is required")
