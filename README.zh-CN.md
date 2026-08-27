@@ -12,6 +12,7 @@ GeoRAG 是一个基于 Retrieval-Augmented Generation (RAG) 技术的地理信�
 - **多模型支持**：支持多种嵌入模型和聊天模型，可根据需求灵活配置
 - **多数据库**：支持 Pgvector 和 ChromaDB 两种向量数据库
 - **MCP 工具集成**：集成 Model Context Protocol 工具，扩展系统功能
+- **命令行客户端**：自带带认证的 `georag` CLI，支持 SSE 流式聊天、会话管理、MCP 与知识库操作，详见 [georag_cli/README.md](./georag_cli/README.md)
 
 ## 快速开始
 

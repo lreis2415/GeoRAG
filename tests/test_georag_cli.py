@@ -247,3 +247,222 @@ def test_auth_login_stores_token_without_printing_it(monkeypatch, capsys):
     assert saved == {"local": token}
     assert token not in output
     assert '"ok": true' in output
+
+
+def _sse_body(*events) -> bytes:
+    lines = []
+    for event in events:
+        lines.append(f"data: {json.dumps(event, ensure_ascii=False)}")
+        lines.append("")
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def test_stream_request_decodes_sse_events_and_ignores_frames():
+    payload = b": keepalive\n" b"event: message\n" + _sse_body(
+        {"type": "text", "content": "你好"},
+        {"type": "sources", "sources": [{"chunk_id": "c1"}]},
+        {"type": "done", "response": "你好", "session_id": "s-1"},
+    )
+
+    def handler(request):
+        assert request.headers["authorization"] == "Bearer access-token"
+        return httpx.Response(
+            200, headers={"content-type": "text/event-stream"}, content=payload
+        )
+
+    with ApiClient(
+        Profile("http://mm.test/mbms", "http://georag.test/llm/v1"),
+        token="access-token",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        events = list(
+            client.stream_request("POST", "/chat/stream", json_body={"query": "问题"})
+        )
+
+    assert [event["type"] for event in events] == ["text", "sources", "done"]
+    assert events[-1]["session_id"] == "s-1"
+
+
+def test_stream_request_maps_401_to_authentication_error():
+    with ApiClient(
+        Profile(),
+        token="access-token",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(401, json={"detail": "invalid"})
+        ),
+    ) as client:
+        with pytest.raises(AuthenticationError):
+            list(client.stream_request("POST", "/chat/stream", json_body={}))
+
+
+def _patch_stream_client(monkeypatch, events):
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def stream_request(self, method, path, *, json_body=None, **_kwargs):
+            captured.update(method=method, path=path, json_body=json_body)
+            return iter(events)
+
+    class FakeStore:
+        def get_token(self, _profile):
+            return _token(int(time.time()) + 3600)
+
+    class FakeConfigStore:
+        def get_profile(self, _profile):
+            return Profile()
+
+    monkeypatch.setattr(cli, "CredentialStore", FakeStore)
+    monkeypatch.setattr(cli, "ConfigStore", FakeConfigStore)
+    monkeypatch.setattr(cli, "ApiClient", FakeClient)
+    return captured
+
+
+def test_chat_stream_command_prints_text_and_summary(monkeypatch, capsys):
+    _patch_stream_client(
+        monkeypatch,
+        [
+            {"type": "text", "content": "数字地形"},
+            {"type": "text", "content": "模型是…"},
+            {
+                "type": "tool",
+                "call_id": "c1",
+                "status": "succeeded",
+                "tool_name": "pygeomodels.run",
+            },
+            {"type": "sources", "sources": [{"chunk_id": "c1"}]},
+            {
+                "type": "done",
+                "response": "数字地形模型是…",
+                "session_id": "s-1",
+                "message_count": 1,
+                "sources": [{"chunk_id": "c1"}],
+            },
+        ],
+    )
+
+    assert cli.main(["chat", "stream", "--query", "什么是DTM？", "--use-memory"]) == 0
+    captured = capsys.readouterr()
+
+    assert captured.out.startswith("数字地形模型是…")
+    assert '"session_id": "s-1"' in captured.out
+    assert '"tool_calls"' in captured.out
+
+
+def test_chat_stream_command_json_output(monkeypatch, capsys):
+    _patch_stream_client(
+        monkeypatch,
+        [
+            {"type": "text", "content": "答案"},
+            {"type": "done", "response": "答案", "session_id": "s-2"},
+        ],
+    )
+
+    assert cli.main(["--output", "json", "chat", "stream", "--query", "q"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["ok"] is True
+    assert payload["result"]["response"] == "答案"
+    assert payload["result"]["session_id"] == "s-2"
+
+
+def test_chat_stream_command_sends_mcp_options(monkeypatch, capsys):
+    captured = _patch_stream_client(
+        monkeypatch,
+        [{"type": "done", "response": "ok", "session_id": "s-3"}],
+    )
+
+    assert (
+        cli.main(
+            [
+                "chat",
+                "stream",
+                "--query",
+                "q",
+                "--use-mcp",
+                "--mcp-server",
+                "pygeomodels",
+                "--mcp-server",
+                "pygeoc",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    assert captured["path"] == "/chat/stream"
+    assert captured["json_body"]["use_mcp"] is True
+    assert captured["json_body"]["mcp_servers"] == ["pygeomodels", "pygeoc"]
+
+
+def test_chat_stream_command_fails_on_error_event(monkeypatch, capsys):
+    _patch_stream_client(
+        monkeypatch,
+        [{"type": "error", "code": 5010, "message": "聊天调用超时"}],
+    )
+
+    assert cli.main(["chat", "stream", "--query", "q"]) == 30
+    assert "聊天调用超时" in capsys.readouterr().err
+
+
+def test_session_and_mcp_commands(monkeypatch, capsys):
+    captured = {}
+
+    class FakeClient:
+        def request_json(self, method, path, **kwargs):
+            captured.update(method=method, path=path, **kwargs)
+            return {"success": True, "code": 2000, "message": "ok", "data": {}}
+
+    def fake_run_authenticated(args, callback, logger=None):
+        cli._success(args, callback(FakeClient()))
+
+    monkeypatch.setattr(cli, "_run_authenticated", fake_run_authenticated)
+
+    assert cli.main(["session", "list"]) == 0
+    capsys.readouterr()
+    assert captured["method"] == "GET"
+    assert captured["path"] == "/chat/sessions"
+
+    assert (
+        cli.main(
+            [
+                "session",
+                "history",
+                "s-1",
+                "--limit",
+                "5",
+                "--offset",
+                "10",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    assert captured["path"] == "/chat/sessions/s-1/history"
+    assert captured["params"] == {"limit": 5, "offset": 10}
+
+    assert cli.main(["session", "rename", "s-1", "--title", "新标题"]) == 0
+    capsys.readouterr()
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/chat/sessions/s-1/rename"
+    assert captured["json_body"] == {"title": "新标题"}
+
+    assert cli.main(["mcp", "list"]) == 0
+    capsys.readouterr()
+    assert captured["path"] == "/mcp/servers"
+
+
+def test_session_delete_requires_confirmation():
+    parser = cli.build_parser()
+
+    args = parser.parse_args(["session", "delete", "s-1"])
+    with pytest.raises(cli.ConfigError, match="--yes"):
+        cli._require_confirmation(args)

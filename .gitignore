@@ -54,3 +54,6 @@ db_backups/
 *.zip
 *.tar.gz
 *.tar
+
+# Python 打包元数据（pip install -e 生成）
+georag_cli.egg-info/

@@ -82,6 +82,63 @@ def build_parser() -> argparse.ArgumentParser:
         "--use-memory", dest="use_memory", action="store_true", default=None
     )
     memory_group.add_argument("--no-memory", dest="use_memory", action="store_false")
+    chat_stream_cmd = chat_sub.add_parser(
+        "stream", help="chat over the SSE streaming API"
+    )
+    chat_stream_cmd.add_argument("--query", required=True)
+    chat_stream_cmd.add_argument("--prompt", default=DEFAULT_PROMPT)
+    chat_stream_cmd.add_argument("--chat-model")
+    chat_stream_cmd.add_argument("--db-name", help="optional knowledge base for RAG")
+    chat_stream_cmd.add_argument("--session-id")
+    stream_memory_group = chat_stream_cmd.add_mutually_exclusive_group()
+    stream_memory_group.add_argument(
+        "--use-memory", dest="use_memory", action="store_true", default=None
+    )
+    stream_memory_group.add_argument(
+        "--no-memory", dest="use_memory", action="store_false"
+    )
+    mcp_group = chat_stream_cmd.add_mutually_exclusive_group()
+    mcp_group.add_argument(
+        "--use-mcp", dest="use_mcp", action="store_true", default=None
+    )
+    mcp_group.add_argument("--no-mcp", dest="use_mcp", action="store_false")
+    chat_stream_cmd.add_argument(
+        "--mcp-server",
+        action="append",
+        dest="mcp_servers",
+        metavar="NAME",
+        help="restrict MCP to this server (repeatable)",
+    )
+
+    session = subparsers.add_parser("session", help="manage chat sessions")
+    session_sub = session.add_subparsers(dest="command", required=True)
+    session_sub.add_parser("list", help="list chat sessions")
+    session_history = session_sub.add_parser(
+        "history", help="show one session's messages"
+    )
+    session_history.add_argument("session_id")
+    session_history.add_argument("--limit", type=int, default=100)
+    session_history.add_argument("--offset", type=int, default=0)
+    session_rename = session_sub.add_parser("rename", help="rename a session")
+    session_rename.add_argument("session_id")
+    session_rename.add_argument("--title", required=True)
+    session_delete = session_sub.add_parser(
+        "delete", help="permanently delete one session"
+    )
+    session_delete.add_argument("session_id")
+    session_delete.add_argument(
+        "--yes", action="store_true", help="confirm permanent deletion"
+    )
+    session_clear = session_sub.add_parser(
+        "clear", help="permanently delete all sessions"
+    )
+    session_clear.add_argument(
+        "--yes", action="store_true", help="confirm permanent deletion"
+    )
+
+    mcp = subparsers.add_parser("mcp", help="inspect MCP tool servers")
+    mcp_sub = mcp.add_subparsers(dest="command", required=True)
+    mcp_sub.add_parser("list", help="list configured MCP servers")
 
     kb = subparsers.add_parser("kb", help="manage knowledge bases")
     kb_sub = kb.add_subparsers(dest="command", required=True)
@@ -305,6 +362,115 @@ def _handle_chat(
     )
 
 
+def _handle_chat_stream(
+    args: argparse.Namespace, logger: Optional[RequestLogger] = None
+) -> None:
+    body = {"prompt": args.prompt, "query": args.query}
+    if args.chat_model:
+        body["chat_model_name"] = args.chat_model
+    if args.db_name:
+        body["db_name"] = args.db_name
+    if args.session_id:
+        body["session_id"] = args.session_id
+    if args.use_memory is not None:
+        body["use_memory"] = args.use_memory
+    if args.use_mcp is not None:
+        body["use_mcp"] = args.use_mcp
+    if args.mcp_servers:
+        body["mcp_servers"] = args.mcp_servers
+
+    profile = ConfigStore().get_profile(args.profile)
+    token = require_active_token(CredentialStore(), args.profile)
+    json_output = args.output == "json"
+    tool_events: list[Dict[str, Any]] = []
+    terminal: Optional[Dict[str, Any]] = None
+    with ApiClient(profile, token=token, timeout=args.timeout, logger=logger) as client:
+        for event in client.stream_request("POST", "/chat/stream", json_body=body):
+            event_type = event.get("type")
+            if event_type == "text":
+                if not json_output:
+                    print(event.get("content", ""), end="", flush=True)
+            elif event_type == "sources":
+                if not json_output:
+                    count = len(event.get("sources") or [])
+                    print(f"\n[sources] {count} 个引用片段", file=sys.stderr)
+            elif event_type == "tool":
+                tool_events.append(event)
+                if not json_output:
+                    name = event.get("tool_name") or event.get("tool_key") or "tool"
+                    print(f"[tool:{event.get('status', '?')}] {name}", file=sys.stderr)
+            elif event_type == "done":
+                terminal = event
+            elif event_type == "error":
+                raise ApiError(str(event.get("message", "Chat stream failed")))
+    if terminal is None:
+        raise ApiError("Stream ended without a done event")
+    if json_output:
+        result = dict(terminal)
+        if tool_events and not result.get("tool_calls"):
+            result["tool_calls"] = tool_events
+        _emit(args, {"ok": True, "result": result})
+        return
+    print()
+    summary = {key: value for key, value in terminal.items() if key != "response"}
+    if tool_events and not summary.get("tool_calls"):
+        summary["tool_calls"] = tool_events
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def _handle_session(
+    args: argparse.Namespace, logger: Optional[RequestLogger] = None
+) -> None:
+    if args.command == "list":
+        _run_authenticated(
+            args, lambda client: client.request_json("GET", "/chat/sessions"), logger
+        )
+    elif args.command == "history":
+        _run_authenticated(
+            args,
+            lambda client: client.request_json(
+                "GET",
+                f"/chat/sessions/{args.session_id}/history",
+                params={"limit": args.limit, "offset": args.offset},
+            ),
+            logger,
+        )
+    elif args.command == "rename":
+        _run_authenticated(
+            args,
+            lambda client: client.request_json(
+                "POST",
+                f"/chat/sessions/{args.session_id}/rename",
+                json_body={"title": args.title},
+            ),
+            logger,
+        )
+    elif args.command == "delete":
+        _require_confirmation(args)
+        _run_authenticated(
+            args,
+            lambda client: client.request_json(
+                "DELETE", f"/chat/sessions/{args.session_id}"
+            ),
+            logger,
+        )
+    elif args.command == "clear":
+        _require_confirmation(args)
+        _run_authenticated(
+            args,
+            lambda client: client.request_json("POST", "/chat/sessions/clear"),
+            logger,
+        )
+
+
+def _handle_mcp(
+    args: argparse.Namespace, logger: Optional[RequestLogger] = None
+) -> None:
+    _run_authenticated(
+        args, lambda client: client.request_json("GET", "/mcp/servers"), logger
+    )
+
+
 def _handle_kb(
     args: argparse.Namespace, logger: Optional[RequestLogger] = None
 ) -> None:
@@ -409,7 +575,14 @@ def run(args: argparse.Namespace) -> None:
     elif args.group == "models":
         _handle_models(args, logger)
     elif args.group == "chat":
-        _handle_chat(args, logger)
+        if args.command == "stream":
+            _handle_chat_stream(args, logger)
+        else:
+            _handle_chat(args, logger)
+    elif args.group == "session":
+        _handle_session(args, logger)
+    elif args.group == "mcp":
+        _handle_mcp(args, logger)
     elif args.group == "kb":
         _handle_kb(args, logger)
     elif args.group == "file":

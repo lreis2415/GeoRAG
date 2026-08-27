@@ -69,6 +69,27 @@ mypy .               # 类型检查
 bandit -r .          # 安全检查
 ```
 
+### CLI 客户端
+
+项目自带带认证的命令行客户端 `georag`（SSE 流式聊天、会话/知识库/MCP 管理），完整文档见 [georag_cli/README.md](./georag_cli/README.md)：
+
+```bash
+# 安装到 conda 环境（依赖仅 httpx + keyring）
+conda activate langchain_v03
+pip install -e .
+
+# 免激活用法
+/opt/homebrew/Caskroom/miniconda/base/envs/langchain_v03/bin/georag --help
+
+# 常用命令
+georag auth login
+georag chat stream --query "什么是DTM？" --db-name geo_knowledge_base --use-memory
+georag session list
+georag mcp list
+```
+
+CLI 单元测试：`python -m pytest tests/test_georag_cli.py`
+
 ### Docker 部署
 ```bash
 # 构建并运行 Docker 容器

@@ -10,7 +10,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, List, Optional
 from uuid import uuid4
 
 import httpx
@@ -442,6 +442,7 @@ class ApiClient:
         path: str,
         *,
         data: Optional[Dict[str, Any]] = None,
+        params: Optional[Dict[str, Any]] = None,
         json_body: Optional[Dict[str, Any]] = None,
         files: Any = None,
         needs_auth: bool = True,
@@ -456,6 +457,7 @@ class ApiClient:
         request_summary = {
             "data": _redact_log_value(data),
             "json": _redact_log_value(json_body),
+            "params": _redact_log_value(params),
             "files": _summarize_uploads(files),
         }
         try:
@@ -463,6 +465,7 @@ class ApiClient:
                 method,
                 f"{base_url}{path}",
                 headers=self._headers(needs_auth),
+                params=params,
                 data=data,
                 json=json_body,
                 files=files,
@@ -508,6 +511,79 @@ class ApiClient:
                 response=response_payload,
             )
         return self._handle_response(response)
+
+    def stream_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: Optional[Dict[str, Any]] = None,
+        needs_auth: bool = True,
+    ) -> Iterator[Dict[str, Any]]:
+        """Stream an SSE endpoint and yield each decoded ``data:`` JSON event."""
+        url = f"{self.profile.georag_url}{path}"
+        started_at = datetime.now(timezone.utc)
+        started = time.perf_counter()
+        request_summary = {"json": _redact_log_value(json_body)}
+        events: List[Dict[str, Any]] = []
+
+        def log(status_code: Optional[int], error: Optional[Dict[str, Any]]) -> None:
+            if not self.logger:
+                return
+            self.logger.api_call(
+                started_at=started_at,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                service="georag",
+                method=method,
+                path=path,
+                request=request_summary,
+                status_code=status_code,
+                response={
+                    "event_types": [event.get("type") for event in events],
+                    "event_count": len(events),
+                    "terminal": events[-1] if events else None,
+                },
+                error=error,
+            )
+
+        try:
+            with self.client.stream(
+                method, url, headers=self._headers(needs_auth), json=json_body
+            ) as response:
+                if response.status_code in {401, 403}:
+                    response.read()
+                    log(response.status_code, {"type": "authentication"})
+                    raise AuthenticationError(
+                        "Authentication was rejected. Run 'georag auth login'."
+                    )
+                if response.is_error:
+                    response.read()
+                    message = self._message_from_response(response)
+                    log(
+                        response.status_code,
+                        {"type": "api_error", "message": message},
+                    )
+                    raise ApiError(message, status_code=response.status_code)
+                for line in response.iter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[len("data:") :].strip()
+                    if not payload:
+                        continue
+                    try:
+                        event = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(event, dict):
+                        events.append(event)
+                        yield event
+                log(response.status_code, None)
+        except httpx.TimeoutException as exc:
+            log(None, {"type": "timeout", "message": str(exc)})
+            raise ConnectivityError("Request timed out") from exc
+        except httpx.RequestError as exc:
+            log(None, {"type": "request_error", "message": str(exc)})
+            raise ConnectivityError(f"Cannot reach API: {exc}") from exc
 
     def download(self, path: str, destination: Path) -> None:
         started_at = datetime.now(timezone.utc)

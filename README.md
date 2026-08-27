@@ -14,6 +14,7 @@ GeoRAG is a geographic information Q&A system based on Retrieval-Augmented Gener
 - **Multi-Model Support**: Support multiple embedding models and chat models with flexible configuration
 - **Multi-Database**: Support both Pgvector and ChromaDB vector databases
 - **MCP Tool Integration**: Integrate Model Context Protocol tools to extend system functionality
+- **Command-Line Client**: An authenticated `georag` CLI with SSE streaming chat, session, MCP, and knowledge-base management — see [georag_cli/README.md](./georag_cli/README.md)
 
 ## Quick Start
 
@@ -300,6 +301,19 @@ docker exec -i georag-postgres psql -U geo -d georag_dev < "$BACKUP_DIR/georag_d
 Notes:
 - When restoring into a fresh container, make sure the pgvector extension is available (`db/init/init_vector_tables.sql` runs automatically on first container startup).
 - The SQL dump resets `search_path` to `''`. If you hit schema-related errors during import, run `SET search_path = public;` and retry.
+
+## CLI
+
+This repository ships a command-line client (`georag`) for authenticated API access, including SSE streaming chat, session management, MCP server listing, and knowledge-base operations:
+
+```bash
+conda activate langchain_v03
+pip install -e .
+georag auth login
+georag chat stream --query "What is a DTM?" --use-memory
+```
+
+Full usage: [georag_cli/README.md](./georag_cli/README.md)
 
 ## Code Quality
 
