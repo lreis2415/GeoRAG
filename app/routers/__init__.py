@@ -7,10 +7,12 @@ from .chat import router as chat_router
 from .health import router as health_router
 from .knowledge import router as knowledge_router
 from .models import router as models_router
+from .prompt_templates import router as prompt_templates_router
 
 __all__ = [
     "health_router",
     "models_router",
     "knowledge_router",
     "chat_router",
+    "prompt_templates_router",
 ]

@@ -29,6 +29,7 @@ from app.routers import (
     health_router,
     knowledge_router,
     models_router,
+    prompt_templates_router,
 )
 from app.services import MCPService
 from app.utils.config import config
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(models_router, prefix=config.API_PREFIX)
     app.include_router(knowledge_router, prefix=config.API_PREFIX)
     app.include_router(chat_router, prefix=config.API_PREFIX)
+    app.include_router(prompt_templates_router, prefix=config.API_PREFIX)
 
     # 自定义OpenAPI文档
     def custom_openapi():

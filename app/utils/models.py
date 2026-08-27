@@ -126,6 +126,32 @@ class RenameSessionRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=100, description="新的会话标题")
 
 
+class PromptTemplateCreateRequest(BaseModel):
+    """Create a reusable system prompt."""
+
+    name: str = Field(..., min_length=1, max_length=100, description="提示词名称")
+    content: str = Field(..., min_length=1, max_length=20_000, description="提示词内容")
+
+
+class PromptTemplateUpdateRequest(PromptTemplateCreateRequest):
+    """Update a prompt using the version last read by the client."""
+
+    version: int = Field(..., ge=1, description="乐观锁版本")
+
+
+class PromptTemplateResponse(BaseModel):
+    id: str
+    name: str
+    content: str
+    version: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class PromptTemplateListResponse(BaseModel):
+    templates: List[PromptTemplateResponse]
+
+
 class ChatInitResponse(BaseModel):
     """初始化聊天响应模型"""
 

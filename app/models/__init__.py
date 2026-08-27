@@ -5,6 +5,7 @@ app/models 包
 """
 
 from .chat_models import ChatMessage, ChatSession
+from .prompt_template_models import PromptTemplate
 from .knowledge_models import (
     KnowledgeBaseCreateRequest,
     KnowledgeBaseCreateResponse,
@@ -19,6 +20,7 @@ __all__ = [
     # ORM
     "ChatSession",
     "ChatMessage",
+    "PromptTemplate",
     # Knowledge Pydantic schemas
     "KnowledgeBaseInfo",
     "KnowledgeBaseFileInfo",

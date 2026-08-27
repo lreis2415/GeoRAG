@@ -9,7 +9,7 @@ from app.db.base import Base
 
 # 导入 ORM 模型，确保其注册到 Base.metadata（否则 create_all 不会建表）
 # noqa: F401 - 导入仅为注册表结构
-from app.models import ChatMessage, ChatSession  # noqa: F401
+from app.models import ChatMessage, ChatSession, PromptTemplate  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
