@@ -93,10 +93,7 @@ def mock_llm():
 def mock_agent():
     """Mock Agent"""
     agent = MagicMock()
-    result = MagicMock()
-    message = MagicMock()
-    message.content = "这是Agent的回复"
-    result["messages"] = [message]
+    result = {"messages": [AIMessage(content="这是Agent的回复")]}
     agent.ainvoke = AsyncMock(return_value=result)
     return agent
 
@@ -613,7 +610,8 @@ async def test_chat_with_agent_with_rag(
             search_type="similarity", search_kwargs={"k": 4}
         )
         messages = mock_llm.ainvoke.call_args.args[0]
-        assert "只能依据下方“检索上下文”回答" in messages[0].content
+        assert "知识库检索结果" in messages[0].content
+        assert "<检索上下文>" in messages[0].content
         assert "chunk_id" not in messages[0].content
 
 
@@ -649,10 +647,10 @@ async def test_chat_stream_emits_sources_before_rag_answer(
 
 
 @pytest.mark.asyncio
-async def test_chat_with_agent_returns_grounded_no_answer_when_no_chunk_matches(
+async def test_chat_with_agent_no_chunk_match_still_calls_model(
     service_with_db, mock_llm, mock_vector_db, mock_database_service
 ):
-    """无召回时不调用模型，避免生成超出知识库的内容。"""
+    """无召回时不再短路，交由模型结合自身知识（与工具）回答。"""
     mock_database_service.get_vector_db.return_value = mock_vector_db
     retriever = mock_vector_db.get_vector_store.return_value.as_retriever.return_value
     retriever.invoke.return_value = []
@@ -666,8 +664,10 @@ async def test_chat_with_agent_returns_grounded_no_answer_when_no_chunk_matches(
         )
 
     assert result["sources"] == []
-    assert "未检索到足够信息" in result["response"]
-    mock_llm.ainvoke.assert_not_called()
+    assert result["response"] == "这是AI的回复"
+    mock_llm.ainvoke.assert_called_once()
+    messages = mock_llm.ainvoke.call_args.args[0]
+    assert "<检索上下文>" not in messages[0].content
 
 
 @pytest.mark.asyncio
@@ -738,24 +738,30 @@ async def test_chat_stream_passes_configured_recursion_limit(service):
 
 
 @pytest.mark.asyncio
-async def test_chat_with_agent_with_rag_ignores_mcp_tools(
-    service_with_db, mock_llm, mock_vector_db, mock_database_service
+async def test_chat_with_agent_rag_with_mcp_tools_coexist(
+    service_with_db, mock_agent, mock_vector_db, mock_database_service
 ):
-    """RAG 模式只以检索上下文为依据，不注册 MCP 工具。"""
+    """RAG 检索上下文与 MCP 工具共存：工具注册进 Agent，上下文注入系统提示词。"""
     mock_database_service.get_vector_db.return_value = mock_vector_db
     mcp_tools = [MagicMock(name="calculator")]
 
-    with patch.object(service_with_db, "_create_llm", return_value=mock_llm):
-        result = await service_with_db.chat_with_agent(
-            prompt="你是一个地理专家",
-            query="请分析地形数据",
-            db_name="geo_knowledge",
-            mcp_tools=mcp_tools,
-            use_memory=False,
-        )
+    with patch(
+        "app.services.chat_service.create_react_agent", return_value=mock_agent
+    ) as agent_factory:
+        with patch.object(service_with_db, "_create_llm"):
+            result = await service_with_db.chat_with_agent(
+                prompt="你是一个地理专家",
+                query="请分析地形数据",
+                db_name="geo_knowledge",
+                mcp_tools=mcp_tools,
+                use_memory=False,
+            )
 
-        assert result["response"] == "这是AI的回复"
-        mock_llm.ainvoke.assert_called_once()
+    assert result["response"] == "这是Agent的回复"
+    registered_tools = agent_factory.call_args.args[1]
+    assert registered_tools == mcp_tools
+    messages = mock_agent.ainvoke.call_args.args[0]["messages"]
+    assert "<检索上下文>" in messages[0].content
 
 
 @pytest.mark.asyncio

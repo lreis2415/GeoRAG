@@ -26,6 +26,13 @@ from ..utils.tool_calls import ToolCallTracker
 from .base_service import BaseService
 from .database_service import DatabaseService
 
+# 知识库检索上下文的注入模板；约束类指令（如"只准依据检索结果回答"）由调用方
+# 通过 prompt / 提示词模板自行追加，服务端只负责注入检索数据。
+RAG_CONTEXT_PROMPT_TEMPLATE = (
+    "\n\n以下是与用户问题相关的知识库检索结果，回答时可优先参考：\n"
+    "<检索上下文>\n{rag_context}\n</检索上下文>"
+)
+
 
 class ChatService(BaseService):
     """聊天服务类"""
@@ -610,13 +617,6 @@ class ChatService(BaseService):
                 user_id=user_id,
             )
 
-            if db_name and not sources:
-                return {
-                    "response": "知识库中未检索到足够信息，无法基于现有上下文回答。",
-                    "session_id": session_id,
-                    "sources": [],
-                }
-
             # 5. 创建并运行 Agent
             if tools:
                 # 使用 Agent 模式
@@ -683,21 +683,15 @@ class ChatService(BaseService):
         sources = []
         rag_context = ""
 
-        # 指定知识库时，检索是确定性前置步骤而非 Agent 可选工具。
+        # 知识库检索是确定性前置步骤；MCP 工具与检索上下文共存。
         if db_name:
             rag_context, sources = await self._retrieve_context(db_name, query, user_id)
-        elif mcp_tools:
-            # RAG 回答只允许以检索上下文为依据，因此不与 MCP 工具混用。
+        if mcp_tools:
             tools.extend(mcp_tools)
 
         system_prompt = prompt
-        if db_name:
-            system_prompt += (
-                "\n\n你正在执行基于知识库的问答。只能依据下方“检索上下文”回答，"
-                "不得使用自身知识、对话历史或任何外部工具补充事实。"
-                "若上下文无法支持答案，必须明确说明“知识库中未检索到足够信息”。\n\n"
-                f"<检索上下文>\n{rag_context}\n</检索上下文>"
-            )
+        if db_name and rag_context:
+            system_prompt += RAG_CONTEXT_PROMPT_TEMPLATE.format(rag_context=rag_context)
 
         messages = [SystemMessage(content=system_prompt)]
 
@@ -752,12 +746,6 @@ class ChatService(BaseService):
 
         if db_name:
             yield {"type": "sources", "sources": sources}
-            if not sources:
-                yield {
-                    "type": "text",
-                    "content": "知识库中未检索到足够信息，无法基于现有上下文回答。",
-                }
-                return
 
         llm = self._create_llm(chat_model_name)
 
